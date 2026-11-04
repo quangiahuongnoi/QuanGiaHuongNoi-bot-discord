@@ -377,9 +377,9 @@ export default function App() {
   };
 
   // Member moderation handlers (real Discord actions)
-  const handleWarnMember = async (memberId: string, reason: string) => {
+  const handleWarnMember = async (memberId: string, reason: string): Promise<boolean> => {
     const member = members.find(m => m.id === memberId);
-    if (!member) return;
+    if (!member) return false;
     try {
       const res = await fetch('/api/bot/warn-member', {
         method: 'POST',
@@ -387,7 +387,7 @@ export default function App() {
         body: JSON.stringify({ guildId: activeGuild.id, memberId, reason })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) return;
+      if (!res.ok || !data.ok) return false;
       setMembers(prev => prev.map(m => m.id === memberId ? { ...m, warnings: Number(data.warnings || m.warnings + 1) } : m));
       addAuditLog({
         id: `log-${Date.now()}`,
@@ -398,7 +398,10 @@ export default function App() {
         details: `Cảnh cáo thành viên: ${reason}`,
         severity: 'warning'
       });
-    } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const executeModeration = async (
@@ -406,9 +409,9 @@ export default function App() {
     action: 'TIMEOUT' | 'KICK' | 'BAN',
     reason: string,
     durationMinutes?: number
-  ) => {
+  ): Promise<boolean> => {
     const member = members.find(m => m.id === memberId);
-    if (!member) return;
+    if (!member) return false;
     try {
       const res = await fetch('/api/bot/moderate-member', {
         method: 'POST',
@@ -416,7 +419,7 @@ export default function App() {
         body: JSON.stringify({ guildId: activeGuild.id, memberId, action, durationMinutes, reason })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) return;
+      if (!res.ok || !data.ok) return false;
 
       if (action === 'TIMEOUT') {
         setMembers(prev => prev.map(m => m.id === memberId ? {
@@ -438,18 +441,19 @@ export default function App() {
         severity: 'danger'
       });
     } catch {}
+    return true;
   };
 
-  const handleTimeoutMember = (memberId: string, durationMinutes: number, reason: string) => {
-    void executeModeration(memberId, 'TIMEOUT', reason, durationMinutes);
+  const handleTimeoutMember = (memberId: string, durationMinutes: number, reason: string): Promise<boolean> => {
+    return executeModeration(memberId, 'TIMEOUT', reason, durationMinutes);
   };
 
-  const handleKickMember = (memberId: string, reason: string) => {
-    void executeModeration(memberId, 'KICK', reason);
+  const handleKickMember = (memberId: string, reason: string): Promise<boolean> => {
+    return executeModeration(memberId, 'KICK', reason);
   };
 
-  const handleBanMember = (memberId: string, reason: string) => {
-    void executeModeration(memberId, 'BAN', reason);
+  const handleBanMember = (memberId: string, reason: string): Promise<boolean> => {
+    return executeModeration(memberId, 'BAN', reason);
   };
 
   const handleExecuteCommandInApp = (input: string): CommandExecutionOutput => {
