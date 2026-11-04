@@ -401,97 +401,55 @@ export default function App() {
     } catch {}
   };
 
-  const handleTimeoutMember = (memberId: string, durationMinutes: number, reason: string) => {
+  const executeModeration = async (
+    memberId: string,
+    action: 'TIMEOUT' | 'KICK' | 'BAN',
+    reason: string,
+    durationMinutes?: number
+  ) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
+    try {
+      const res = await fetch('/api/bot/moderate-member', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guildId: activeGuild.id, memberId, action, durationMinutes, reason })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) return;
 
-    fetch('/api/bot/moderate-member', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        guildId: activeGuild.id,
-        memberId,
-        action: 'TIMEOUT',
-        durationMinutes,
-        reason
-      })
-    }).catch(() => {});
+      if (action === 'TIMEOUT') {
+        setMembers(prev => prev.map(m => m.id === memberId ? {
+          ...m,
+          isTimedOut: true,
+          timeoutUntil: `Hết hạn sau ${durationMinutes || 60} phút`
+        } : m));
+      } else {
+        setMembers(prev => prev.filter(m => m.id !== memberId));
+      }
 
-    setMembers(prev =>
-      prev.map(m =>
-        m.id === memberId
-          ? {
-              ...m,
-              isTimedOut: true,
-              timeoutUntil: `Hết hạn sau ${durationMinutes} phút`
-            }
-          : m
-      )
-    );
+      addAuditLog({
+        id: `log-${Date.now()}`,
+        timestamp: getNowTime(),
+        actionType: action === 'KICK' ? 'MEMBER_KICK' : action === 'BAN' ? 'MEMBER_BAN' : 'MEMBER_TIMEOUT',
+        executor: { name: 'Admin Dashboard', isBot: false },
+        target: { name: member.displayName, id: member.id },
+        details: `${action === 'TIMEOUT' ? 'Timeout' : action === 'KICK' ? 'Kick' : 'Ban'}: ${reason}`,
+        severity: 'danger'
+      });
+    } catch {}
+  };
 
-    addAuditLog({
-      id: `log-${Date.now()}`,
-      timestamp: getNowTime(),
-      actionType: 'MEMBER_TIMEOUT',
-      executor: { name: 'Admin Dashboard', isBot: false },
-      target: { name: member.displayName, id: member.id },
-      details: `Áp dụng timeout ${durationMinutes} phút: ${reason}`,
-      severity: 'danger'
-    });
+  const handleTimeoutMember = (memberId: string, durationMinutes: number, reason: string) => {
+    void executeModeration(memberId, 'TIMEOUT', reason, durationMinutes);
   };
 
   const handleKickMember = (memberId: string, reason: string) => {
-    const member = members.find(m => m.id === memberId);
-    if (!member) return;
-
-    fetch('/api/bot/moderate-member', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        guildId: activeGuild.id,
-        memberId,
-        action: 'KICK',
-        reason
-      })
-    }).catch(() => {});
-
-    setMembers(prev => prev.filter(m => m.id !== memberId));
-    addAuditLog({
-      id: `log-${Date.now()}`,
-      timestamp: getNowTime(),
-      actionType: 'MEMBER_KICK',
-      executor: { name: 'Admin Dashboard', isBot: false },
-      target: { name: member.displayName, id: member.id },
-      details: `Kick thành viên khỏi máy chủ: ${reason}`,
-      severity: 'danger'
-    });
+    void executeModeration(memberId, 'KICK', reason);
   };
 
   const handleBanMember = (memberId: string, reason: string) => {
-    const member = members.find(m => m.id === memberId);
-    if (!member) return;
-
-    fetch('/api/bot/moderate-member', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        guildId: activeGuild.id,
-        memberId,
-        action: 'BAN',
-        reason
-      })
-    }).catch(() => {});
-
-    setMembers(prev => prev.filter(m => m.id !== memberId));
-    addAuditLog({
-      id: `log-${Date.now()}`,
-      timestamp: getNowTime(),
-      actionType: 'MEMBER_BAN',
-      executor: { name: 'Admin Dashboard', isBot: false },
-      target: { name: member.displayName, id: member.id },
-      details: `Cấm vĩnh viễn (Ban): ${reason}`,
-      severity: 'danger'
-    });
+    void executeModeration(memberId, 'BAN', reason);
   };
 
   const handleExecuteCommandInApp = (input: string): CommandExecutionOutput => {
