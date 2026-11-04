@@ -313,11 +313,147 @@ async function hydrateRuntimeFromPersistence() {
  * Multi-tier resolver that extracts song metadata from YouTube URLs / search queries
  * and resolves a reliable audio stream for FFmpeg + @discordjs/voice.
  */
+interface SpotifyTrackMetadata {
+  id: string;
+  name: string;
+  artists: string[];
+  album: string;
+  durationMs: number;
+  externalUrl: string;
+  thumbnail?: string;
+}
+
+let spotifyAccessToken = '';
+let spotifyAccessTokenExpiresAt = 0;
+
+function extractSpotifyTrackId(input: string): string | null {
+  const match = input.trim().match(/(?:open\.spotify\.com\/(?:intl-[^/]+\/)?track\/|spotify:track:)([A-Za-z0-9]+)(?:[?&#].*)?$/i);
+  return match?.[1] || null;
+}
+
+async function getSpotifyAccessToken(): Promise<string> {
+  const clientId = (process.env.SPOTIFY_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.SPOTIFY_CLIENT_SECRET || '').trim();
+  if (!clientId || !clientSecret) {
+    throw new Error('Spotify chưa được cấu hình. Hãy thêm SPOTIFY_CLIENT_ID và SPOTIFY_CLIENT_SECRET trên Render.');
+  }
+  if (spotifyAccessToken && Date.now() < spotifyAccessTokenExpiresAt) return spotifyAccessToken;
+
+  const credentials = Buffer.from(clientId + ':' + clientSecret).toString('base64');
+  const response = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Basic ' + credentials,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: 'grant_type=client_credentials'
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error('Spotify OAuth thất bại (' + response.status + '): ' + body.slice(0, 300));
+  }
+  const data: any = await response.json();
+  spotifyAccessToken = String(data.access_token || '');
+  spotifyAccessTokenExpiresAt = Date.now() + Math.max(60, Number(data.expires_in || 3600) - 60) * 1000;
+  if (!spotifyAccessToken) throw new Error('Spotify không trả về access token.');
+  return spotifyAccessToken;
+}
+
+async function getSpotifyTrackMetadata(trackId: string): Promise<SpotifyTrackMetadata> {
+  const token = await getSpotifyAccessToken();
+  const response = await fetch('https://api.spotify.com/v1/tracks/' + encodeURIComponent(trackId) + '?market=VN', {
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error('Spotify Track API thất bại (' + response.status + '): ' + body.slice(0, 300));
+  }
+  const data: any = await response.json();
+  return {
+    id: data.id,
+    name: data.name,
+    artists: Array.isArray(data.artists) ? data.artists.map((artist: any) => String(artist?.name || '')).filter(Boolean) : [],
+    album: String(data.album?.name || ''),
+    durationMs: Number(data.duration_ms || 0),
+    externalUrl: String(data.external_urls?.spotify || 'https://open.spotify.com/track/' + trackId),
+    thumbnail: data.album?.images?.[0]?.url
+  };
+}
+
+function normalizeMusicText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+    .replace(/\b(official|audio|video|lyrics?|lyric|mv|music video|visualizer|hd|4k|remix)\b/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreSpotifyYouTubeCandidate(spotify: SpotifyTrackMetadata, candidate: any): number {
+  const expectedTitle = normalizeMusicText(spotify.name);
+  const candidateTitle = normalizeMusicText(String(candidate?.title || ''));
+  const expectedArtists = spotify.artists.map(normalizeMusicText).filter(Boolean);
+  const candidateAuthor = normalizeMusicText(String(candidate?.author?.name || ''));
+  let score = 0;
+  if (candidateTitle === expectedTitle) score += 70;
+  else if (candidateTitle.includes(expectedTitle) || expectedTitle.includes(candidateTitle)) score += 45;
+  if (expectedArtists.some((artist) => artist && (candidateAuthor.includes(artist) || artist.includes(candidateAuthor)))) score += 30;
+  if (spotify.durationMs > 0 && Number(candidate?.seconds) > 0) {
+    const delta = Math.abs(Number(candidate.seconds) * 1000 - spotify.durationMs);
+    if (delta <= 8000) score += 20;
+    else if (delta <= 20000) score += 10;
+  }
+  return score;
+}
+
+async function resolveSpotifyTrackToPlayableAudio(spotifyUrl: string, requestedBy: string): Promise<ResolvedPlayableTrack> {
+  const trackId = extractSpotifyTrackId(spotifyUrl);
+  if (!trackId) throw new Error('Link Spotify không hợp lệ. Hiện hỗ trợ Spotify Track URL.');
+
+  const spotify = await getSpotifyTrackMetadata(trackId);
+  if (!spotify.artists.length) throw new Error('Spotify không trả về nghệ sĩ của bài hát này.');
+
+  const searchQuery = spotify.name + ' ' + spotify.artists.join(' ');
+  const searchRes = await yts(searchQuery);
+  const candidates = (searchRes.videos || []).slice(0, 10);
+  const ranked = candidates
+    .map((candidate: any) => ({ candidate, score: scoreSpotifyYouTubeCandidate(spotify, candidate) }))
+    .sort((a: any, b: any) => b.score - a.score);
+  const best = ranked[0];
+
+  if (!best || best.score < 70 || !best.candidate?.url) {
+    throw new Error('Không tìm thấy bản audio YouTube khớp đủ chính xác với Spotify: ' + spotify.artists.join(', ') + ' - ' + spotify.name + '.');
+  }
+
+  const streamUrl = await resolveYouTubeAudioWithYtDlp(best.candidate.url);
+  if (!streamUrl) {
+    throw new Error('Đã nhận diện Spotify: ' + spotify.artists.join(', ') + ' - ' + spotify.name + ', nhưng YouTube hiện không cung cấp stream audio đầy đủ cho bot.');
+  }
+
+  return {
+    title: spotify.name,
+    author: spotify.artists.join(', '),
+    videoUrl: best.candidate.url,
+    streamUrl,
+    thumbnail: spotify.thumbnail || best.candidate.thumbnail || best.candidate.image,
+    durationText: best.candidate.timestamp || '03:30',
+    requestedBy,
+    sourceLabel: 'Spotify metadata → YouTube full audio'
+  };
+}
+
 async function resolveAudioStreamForQuery(
   rawQuery: string,
   requestedBy: string
 ): Promise<ResolvedPlayableTrack> {
   const query = rawQuery.trim() || 'Chìm Sâu RPT MCK';
+
+  if (extractSpotifyTrackId(query)) {
+    return resolveSpotifyTrackToPlayableAudio(query, requestedBy);
+  }
 
   // Direct MP3/M4A/OGG audio link
   if (/^https?:\/\/.+\.(mp3|m4a|ogg|wav|aac|flac)(\?.*)?$/i.test(query)) {
