@@ -111,6 +111,8 @@ interface GuildVoiceSession {
   loopMode: 'OFF' | 'TRACK' | 'QUEUE';
   filterPreset: 'FLAT' | 'BASS_BOOST' | 'VOCAL' | 'NIGHTCORE' | 'LOFI' | 'ACOUSTIC';
   audioProcess?: any;
+  transitioning: boolean;
+  queueGeneration: number;
 }
 
 const guildVoiceSessions = new Map<string, GuildVoiceSession>();
@@ -672,6 +674,7 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
     session.history = [session.currentTrack, ...session.history].slice(0, 20);
   }
 
+  session.transitioning = true;
   session.currentTrack = track;
   session.isPaused = false;
 
@@ -762,6 +765,7 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
     if (resource.volume) resource.volume.setVolume(session.volume / 100);
     session.currentResource = resource;
     session.player.play(resource);
+    session.transitioning = false;
   } catch (err: any) {
     console.warn(`[Audio Stream Notice in ${session.channelName}]:`, err?.message);
     const nextTrack = session.queue.shift();
@@ -953,12 +957,14 @@ async function ensureVoiceSession(
       stay247: true,
       volume: 85,
       loopMode: 'OFF',
-      filterPreset: 'FLAT'
+      filterPreset: 'FLAT',
+      transitioning: false,
+      queueGeneration: 0
     };
 
     player.on(AudioPlayerStatus.Idle, async () => {
       const currentSession = guildVoiceSessions.get(guild.id);
-      if (!currentSession) return;
+      if (!currentSession || currentSession.transitioning) return;
       if (currentSession.audioProcess) {
         try { currentSession.audioProcess.kill('SIGKILL'); } catch {}
         currentSession.audioProcess = undefined;
@@ -1198,17 +1204,22 @@ async function startDiscordBotIfConfigured() {
           if (commandName === 'skip') {
             if (!interaction.guild) return;
             const session = guildVoiceSessions.get(interaction.guild.id);
-            if (!session) {
-              await interaction.reply({ content: 'Không có bài hát nào trong hàng đợi.', ephemeral: true });
+            if (!session || !session.currentTrack) {
+              await interaction.reply({ content: 'Không có bài hát nào đang phát để bỏ qua.', ephemeral: true });
               return;
             }
             const next = session.queue.shift();
+            session.transitioning = true;
+            session.queueGeneration += 1;
+            try { session.player.stop(true); } catch {}
+            if (session.audioProcess) { try { session.audioProcess.kill('SIGKILL'); } catch {} session.audioProcess = undefined; }
+            session.currentResource = undefined;
+            session.currentTrack = null;
             if (next) {
               await playTrackInSession(session, next);
               await interaction.reply(`⏭️ Đã chuyển sang bài: **${next.title}**.`);
             } else {
-              session.player.stop();
-              session.currentTrack = null;
+              session.transitioning = false;
               await interaction.reply('⏭️ Đã bỏ qua bài hiện tại. Hàng đợi đã hết.');
             }
             return;
@@ -1534,6 +1545,23 @@ async function startDiscordBotIfConfigured() {
           if (cmdName === 'play') {
             const songQuery = parsedCmd.rawArgs || 'Chìm Sâu RPT MCK';
             const session = await ensureVoiceSession(message.guild, targetVoice);
+            const isAlreadyPlaying =
+              session.player.state.status === AudioPlayerStatus.Playing && session.currentTrack !== null;
+
+            // Reply immediately when a track is being queued. YouTube resolution can take several seconds,
+            // so waiting for yt-dlp before sending the acknowledgement made the queue notification feel delayed.
+            if (isAlreadyPlaying) {
+              const pendingReply = await message.reply(`🔎 Đang tìm audio đầy đủ và thêm vào hàng đợi: **${songQuery}**...`);
+              try {
+                const resolvedTrack = await resolveAudioStreamForQuery(songQuery, authorDisplay);
+                session.queue.push(resolvedTrack);
+                await pendingReply.edit(`➕ Đã thêm vào hàng đợi (#${session.queue.length}): **${resolvedTrack.title}** tại **🔊 ${targetVoice.name}**.`).catch(() => {});
+              } catch (err: any) {
+                await pendingReply.edit('❌ Không thể thêm bài vào hàng đợi: ' + (err?.message || 'Không lấy được audio đầy đủ.')).catch(() => {});
+              }
+              return;
+            }
+
             let resolvedTrack: ResolvedPlayableTrack;
             try {
               resolvedTrack = await resolveAudioStreamForQuery(songQuery, authorDisplay);
@@ -1542,14 +1570,7 @@ async function startDiscordBotIfConfigured() {
               return;
             }
 
-            const isAlreadyPlaying =
-              session.player.state.status === AudioPlayerStatus.Playing && session.currentTrack !== null;
-
-            if (isAlreadyPlaying) {
-              session.queue.push(resolvedTrack);
-            } else {
-              playTrackInSession(session, resolvedTrack);
-            }
+            playTrackInSession(session, resolvedTrack);
 
             const playEmbed = new EmbedBuilder()
               .setColor(0x10b981)
@@ -1615,18 +1636,24 @@ async function startDiscordBotIfConfigured() {
           // Handle !skip
           if (cmdName === 'skip') {
             const session = guildVoiceSessions.get(message.guild.id);
-            if (!session) {
+            if (!session || !session.currentTrack) {
               await message.reply('⚠️ Không có bài hát nào đang phát để bỏ qua.');
               return;
             }
+            const channelName = session.channelName;
             const next = session.queue.shift();
+            session.transitioning = true;
+            session.queueGeneration += 1;
+            try { session.player.stop(true); } catch {}
+            if (session.audioProcess) { try { session.audioProcess.kill('SIGKILL'); } catch {} session.audioProcess = undefined; }
+            session.currentResource = undefined;
+            session.currentTrack = null;
             if (next) {
-              playTrackInSession(session, next);
-              await message.reply(`⏭️ Đã chuyển sang bài tiếp theo: **${next.title}** tại **🔊 ${session.channelName}**!`);
+              await playTrackInSession(session, next);
+              await message.reply(`⏭️ Đã chuyển sang bài tiếp theo: **${next.title}** tại **🔊 ${channelName}**!`);
             } else {
-              session.player.stop();
-              session.currentTrack = null;
-              await message.reply(`⏭️ Đã bỏ qua bài hiện tại. Hàng đợi tại **🔊 ${session.channelName}** hiện đã hết bài.`);
+              session.transitioning = false;
+              await message.reply(`⏭️ Đã bỏ qua bài hiện tại. Hàng đợi tại **🔊 ${channelName}** hiện đã hết bài.`);
             }
             return;
           }
@@ -1635,10 +1662,16 @@ async function startDiscordBotIfConfigured() {
           if (cmdName === 'stop') {
             const session = guildVoiceSessions.get(message.guild.id);
             if (session) {
+              const channelName = session.channelName;
+              session.transitioning = true;
+              session.queueGeneration += 1;
               session.queue = [];
               session.currentTrack = null;
-              session.player.stop();
-              await message.reply(`⏹️ Đã dừng phát nhạc và xóa hàng đợi. Bot vẫn giữ kết nối 24/7 tại **🔊 ${session.channelName}**!`);
+              session.currentResource = undefined;
+              try { session.player.stop(true); } catch {}
+              if (session.audioProcess) { try { session.audioProcess.kill('SIGKILL'); } catch {} session.audioProcess = undefined; }
+              session.transitioning = false;
+              await message.reply(`⏹️ Đã dừng phát nhạc và xóa hàng đợi. Bot vẫn giữ kết nối 24/7 tại **🔊 ${channelName}**!`);
             } else {
               await message.reply('ℹ️ Bot hiện không phát nhạc.');
             }
@@ -2764,7 +2797,8 @@ async function startServer() {
                     queueLength: voiceSession.queue.length,
                     volume: voiceSession.volume,
                     loopMode: voiceSession.loopMode,
-                    filterPreset: voiceSession.filterPreset
+                    filterPreset: voiceSession.filterPreset,
+                    transitioning: voiceSession.transitioning
                   }
                 : null
             };
@@ -2838,9 +2872,13 @@ async function startServer() {
         if (!existingSession) {
           return res.json({ ok: true, message: 'Bot hiện không ở trong kênh Voice nào.' });
         }
-        existingSession.player.stop();
+        existingSession.transitioning = true;
+        existingSession.queueGeneration += 1;
+        existingSession.queue = [];
+        existingSession.currentTrack = null;
+        existingSession.currentResource = undefined;
+        try { existingSession.player.stop(true); } catch {}
         if (existingSession.audioProcess) { try { existingSession.audioProcess.kill('SIGKILL'); } catch {} }
-        existingSession.connection.destroy();
         guildVoiceSessions.delete(targetGuild.id);
         return res.json({ ok: true, message: 'Bot đã rời khỏi kênh Voice.' });
       }
@@ -2874,29 +2912,23 @@ async function startServer() {
         }
 
         if (action === 'skip') {
+          if (!existingSession.currentTrack) {
+            return res.status(409).json({ ok: false, error: 'Hiện không có bài hát đang phát.' });
+          }
           const next = existingSession.queue.shift();
+          const channelName = existingSession.channelName;
+          existingSession.transitioning = true;
+          existingSession.queueGeneration += 1;
+          try { existingSession.player.stop(true); } catch {}
+          if (existingSession.audioProcess) { try { existingSession.audioProcess.kill('SIGKILL'); } catch {} existingSession.audioProcess = undefined; }
+          existingSession.currentResource = undefined;
+          existingSession.currentTrack = null;
           if (next) {
             await playTrackInSession(existingSession, next);
-            return res.json({
-              ok: true,
-              message: `Đã chuyển sang bài: ${next.title}`,
-              track: next,
-              queued: true,
-              queueLength: existingSession.queue.length,
-              channelName: existingSession.channelName
-            });
+            return res.json({ ok: true, message: `Đã chuyển sang bài: ${next.title}`, track: next, queued: true, queueLength: existingSession.queue.length, channelName });
           }
-          existingSession.player.stop();
-          existingSession.currentTrack = null;
-          existingSession.currentResource = undefined;
-          return res.json({
-            ok: true,
-            message: 'Đã bỏ qua bài hát hiện tại.',
-            track: null,
-            queued: false,
-            queueLength: 0,
-            channelName: existingSession.channelName
-          });
+          existingSession.transitioning = false;
+          return res.json({ ok: true, message: 'Đã bỏ qua bài hát hiện tại.', track: null, queued: false, queueLength: 0, channelName });
         }
 
         if (action === 'previous' || action === 'prev') {
