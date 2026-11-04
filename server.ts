@@ -579,7 +579,7 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
         '--remote-components',
         'ejs:github',
         '--extractor-args',
-        `youtube:player_client=${client}`,\n        'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
+        `youtube:player_client=${client};youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416`,
         '--format',
         'bestaudio/best',
         ...(cookieBase64 && fs.existsSync(cookiePath) ? ['--cookies', cookiePath] : []),
