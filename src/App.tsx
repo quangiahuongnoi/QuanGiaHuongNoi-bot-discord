@@ -427,24 +427,55 @@ export default function App() {
     } catch {}
   };
 
-  const handleAddTrack = (track: Track) => {
-    setTracks(prev => [...prev, track]);
-    addAuditLog({
-      id: `log-${Date.now()}`,
-      timestamp: getNowTime(),
-      actionType: 'MUSIC_PLAY',
-      executor: { name: 'Admin Dashboard', isBot: false },
-      details: `Đã thêm bài hát vào hàng đợi: "${track.title}"`,
-      severity: 'info',
-      channelName: '#phát-nhạc'
-    });
+  const handleAddTrack = async (track: Track) => {
+    try {
+      const data = await controlVoiceFromDashboard('play', { query: track.url || track.title });
+      const resolved = data.track;
+      if (resolved) {
+        const mapped: Track = {
+          id: `discord-${resolved.videoUrl || Date.now()}`,
+          title: resolved.title || track.title,
+          artist: resolved.author || track.artist || 'Discord Voice',
+          durationSeconds: parseDurationToSeconds(resolved.durationText),
+          url: resolved.videoUrl || track.url || '',
+          thumbnailUrl: resolved.thumbnail || track.thumbnailUrl || '',
+          requestedBy: resolved.requestedBy || 'Web/App Admin',
+          genre: 'Discord Voice',
+          lyrics: []
+        };
+        setTracks(prev => prev.some(item => item.url === mapped.url) ? prev : [...prev, mapped]);
+      }
+      setIsPlaying(true);
+    } catch {}
   };
 
-  const handleRemoveTrack = (index: number) => {
-    setTracks(prev => prev.filter((_, idx) => idx !== index));
-    if (currentTrackIndex >= index && currentTrackIndex > 0) {
-      setCurrentTrackIndex(prev => prev - 1);
-    }
+  const handleRemoveTrack = async (index: number) => {
+    try {
+      if (index === currentTrackIndex) {
+        await controlVoiceFromDashboard('skip');
+        setIsPlaying(false);
+        return;
+      }
+      const queueIndex = index > currentTrackIndex ? index - 1 : index;
+      const data = await controlVoiceFromDashboard('remove', { queueIndex });
+      if (Array.isArray(data.queue)) {
+        const mapped = data.queue.map((item: any, i: number) => ({
+          id: `discord-${item.videoUrl || i}-${Date.now()}`,
+          title: item.title || 'Bài hát',
+          artist: item.author || 'Discord Voice',
+          durationSeconds: parseDurationToSeconds(item.durationText),
+          url: item.videoUrl || '',
+          thumbnailUrl: item.thumbnail || '',
+          requestedBy: item.requestedBy || 'Discord',
+          genre: 'Discord Voice',
+          lyrics: []
+        }));
+        setTracks(prev => {
+          const current = prev[currentTrackIndex];
+          return current ? [current, ...mapped] : mapped;
+        });
+      }
+    } catch {}
   };
 
   // Member moderation handlers (real Discord actions)
