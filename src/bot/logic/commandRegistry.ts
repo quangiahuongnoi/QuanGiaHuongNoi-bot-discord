@@ -21,7 +21,7 @@ export const INITIAL_DISCORD_COMMANDS: DiscordCommandDef[] = [
     prefixUsage: '!play <tên bài hát / URL>',
     slashUsage: '/play query:<bài hát>',
     category: 'MUSIC',
-    description: 'Phát nhạc chất lượng cao Hi-Fi 384kbps trong kênh Voice từ YouTube, Spotify hoặc SoundCloud.',
+    description: 'Phát audio đầy đủ trong kênh Voice từ YouTube hoặc URL audio trực tiếp.',
     permissions: 'Mọi thành viên',
     enabled: true
   },
@@ -529,7 +529,7 @@ export function executeBotCommand(
         replyContent: '🏓 **Pong!** Kết nối máy chủ hoạt động ổn định 24/24.',
         embed: {
           title: '⚡ Trạng Thái Kết Nối & Uptime 24/7',
-          description: `• Độ trễ Gateway: **18ms**\n• Thời gian hoạt động liên tục: **${formatUptime(ctx.uptimeSeconds)}**\n• Trạng thái Keep-Alive: **Đang bảo vệ 24/24**`,
+          description: `• Độ trễ Gateway: **được đo trực tiếp khi chạy Discord**\n• Thời gian hoạt động liên tục: **${formatUptime(ctx.uptimeSeconds)}**\n• Trạng thái Bot: **đang xử lý lệnh thật**`,
           color: '#10B981',
           footer: 'AegisBot Heartbeat Monitor'
         }
@@ -546,7 +546,7 @@ export function executeBotCommand(
           fields: [
             { name: '👥 Tổng Thành Viên', value: `${ctx.memberCount.toLocaleString()} người`, inline: true },
             { name: '🟢 Đang Trực Tuyến', value: `${ctx.onlineCount.toLocaleString()} người`, inline: true },
-            { name: '🛡️ Chế Độ Bảo Vệ', value: 'Auto-Mod Shield Cấp 2', inline: true },
+            { name: '🛡️ Auto-Mod', value: 'Theo cấu hình máy chủ hiện tại', inline: true },
             { name: '📡 Kênh Đã Liên Kết', value: `${ctx.youtubeCount} YouTube · ${ctx.tiktokCount} TikTok`, inline: true }
           ],
           footer: 'AegisBot Server Telemetry'
@@ -560,11 +560,12 @@ export function executeBotCommand(
         replyContent: `Hồ sơ thành viên **${targetUser}**:`,
         embed: {
           title: `👤 Hồ Sơ Thành Viên: ${targetUser}`,
-          description: 'Trạng thái: **Đang hoạt động tích cực**\nVai trò: `@Thành Viên`, `@VIP Supporter`',
+          description: 'Dữ liệu chi tiết cần được lấy từ Discord runtime của server.',
           color: '#8B5CF6',
           fields: [
-            { name: '⭐ Cấp Độ Hiện Tại', value: 'Level 11 (14,200 XP)', inline: true },
-            { name: '🛡️ Cảnh Cáo Vi Phạm', value: '0 lần (Tài khoản sạch)', inline: true }
+            { name: '👤 Người dùng', value: targetUser, inline: true },
+            { name: '🏠 Server', value: ctx.serverName, inline: true },
+            { name: 'ℹ️ Ghi chú', value: 'Không sử dụng dữ liệu thành viên giả trong command preview.', inline: false }
           ],
           footer: 'AegisBot Member Registry'
         }
@@ -578,12 +579,12 @@ export function executeBotCommand(
         replyContent: `Thẻ cấp độ hoạt động của **${target}**:`,
         embed: {
           title: `🏆 Thẻ Cấp Độ & Kinh Nghiệm — ${target}`,
-          description: 'Tích cực trò chuyện và tham gia Voice để mở khóa các vai trò đặc quyền!',
+          description: 'XP/Level được lấy từ runtime của server khi lệnh chạy thật.',
           color: '#F59E0B',
           fields: [
-            { name: 'Cấp Bậc', value: 'Level 11', inline: true },
-            { name: 'Điểm XP', value: '14,200 / 16,900 XP (84%)', inline: true },
-            { name: 'Danh Hiệu Đạt Được', value: '⚔️ Chiến Binh Năng Nổ', inline: false }
+            { name: '📊 Dữ liệu', value: 'Không sử dụng Level/XP giả trong command preview.', inline: false },
+            { name: '🏠 Server', value: ctx.serverName, inline: true },
+            { name: '👤 Người dùng', value: target, inline: true }
           ],
           footer: 'AegisBot Leveling Engine'
         }
@@ -596,13 +597,9 @@ export function executeBotCommand(
         replyContent: `Bảng xếp hạng thành viên hoạt động sôi nổi nhất tại **${ctx.serverName}**:`,
         embed: {
           title: `👑 Bảng Xếp Hạng Top Tương Tác (${ctx.serverName})`,
-          description:
-            '🥇 **#1. Linh Đan** — Level 11 · `14,200 XP` (1,840 tin nhắn)\n' +
-            '🥈 **#2. Kyomi (Founder)** — Level 9 · `8,450 XP` (1,420 tin nhắn)\n' +
-            '🥉 **#3. Hoàng Long** — Level 7 · `5,200 XP` (980 tin nhắn)\n' +
-            '🏅 **#4. Minh T.** — Level 3 · `1,200 XP` (320 tin nhắn)',
+          description: 'Bảng xếp hạng thật được lấy từ XP runtime của server khi lệnh chạy trực tiếp. Không dùng dữ liệu thành viên giả.',
           color: '#F59E0B',
-          footer: 'Cập nhật tự động theo thời gian thực'
+          footer: 'AegisBot Leveling Engine'
         }
       };
 
@@ -626,13 +623,13 @@ export function executeBotCommand(
       };
 
     case 'play': {
-      const query = parsed.rawArgs || 'Chìm Sâu (Lo-Fi Chill Hop Remix)';
+      const query = parsed.rawArgs || 'Chìm Sâu RPT MCK';
       return {
         handled: true,
         replyContent: `🎶 Đã vào phòng **${targetRoom}**, thêm **${query}** vào hàng đợi và bắt đầu phát trực tiếp!`,
         embed: {
           title: `🎵 Đang Phát Nhạc Tại #${targetRoom}: ${query}`,
-          description: `Yêu cầu bởi: **${ctx.authorName}**\nKênh thoại: **🔊 ${targetRoom}**\nChất lượng: **Hi-Fi 384kbps** · Chế độ 24/7: **Đang bật**`,
+          description: `Yêu cầu bởi: **${ctx.authorName}**\nKênh thoại: **🔊 ${targetRoom}**\nNguồn: **YouTube / Direct Audio** · Chế độ 24/7: **Theo phiên Voice**`,
           color: '#10B981',
           footer: 'Sử dụng !pause, !skip, !leave, !queue hoặc điều khiển trên Web App'
         },
@@ -670,7 +667,7 @@ export function executeBotCommand(
         replyContent: `Danh sách bài hát đang phát tại **${targetRoom}** (${ctx.serverName}):`,
         embed: {
           title: `🎼 Hàng Đợi Phát Nhạc (${ctx.queueCount} bài hát)`,
-          description: `▶ **Đang phát tại 🔊 ${targetRoom}:** ${ctx.currentTrackTitle || 'Chìm Sâu (Lo-Fi Chill Hop Remix)'}\nSử dụng \`!play <tên bài>\` để thêm bài mới hoặc mở tab **Phát Nhạc** trên Web App.`,
+          description: `▶ **Đang phát tại 🔊 ${targetRoom}:** ${ctx.currentTrackTitle || 'Chưa có bài đang phát'}\nSử dụng \`!play <tên bài>\` để thêm bài mới hoặc mở tab **Phát Nhạc** trên Web App.`,
           color: '#10B981',
           footer: 'AegisBot 24/7 Audio Stream'
         }

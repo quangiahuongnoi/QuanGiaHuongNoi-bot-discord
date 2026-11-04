@@ -129,12 +129,17 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
       setTimeout(() => setLiveVoiceNotice(null), 4500);
     } catch {
       setLiveVoiceNotice('Không thể gửi lệnh điều khiển Voice lúc này.');
+      return null;
     } finally {
       setIsControllingVoice(false);
     }
   };
 
-  // Progress timer simulation
+  useEffect(() => {
+    setCurrentTime(0);
+  }, [currentTrack?.id]);
+
+  // Progress display follows the local UI session while Discord Voice remains authoritative.
   useEffect(() => {
     let interval: any = null;
     if (isPlaying && currentTrack) {
@@ -155,42 +160,31 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
     setCurrentTime(Number(e.target.value));
   };
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
+  const handleSearchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-
     const queryText = searchQuery.trim();
-    const newTrack: Track = {
-      id: `custom-${Date.now()}`,
-      title: queryText,
-      artist: 'Nghệ Sĩ Yêu Cầu',
-      durationSeconds: 180 + Math.floor(Math.random() * 60),
-      url: `https://youtube.com/results?search_query=${encodeURIComponent(queryText)}`,
-      thumbnailUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300&auto=format&fit=crop&q=80',
-      requestedBy: 'Admin (Web Dashboard)',
-      genre: 'Nhạc Trực Tuyến',
-      lyrics: [
-        `Giai điệu đang được phát trực tuyến từ yêu cầu: "${queryText}"`,
-        'Âm thanh chất lượng cao chuẩn Hi-Fi 384kbps với bộ lọc độ trễ thấp.',
-        'Thưởng thức trọn vẹn từng khoảnh khắc âm nhạc cùng đồng đội trên máy chủ!'
-      ]
-    };
-
-    onAddTrack(newTrack);
-    handleControlRealVoice('play', queryText);
-    setSearchQuery('');
-    setShowAddSuccess(true);
-    setTimeout(() => setShowAddSuccess(false), 2000);
+    try {
+      const data = await handleControlRealVoice('play', queryText);
+      if (data?.track) {
+        const resolved: Track = {
+          id: `discord-${Date.now()}`,
+          title: data.track.title || queryText,
+          artist: data.track.author || 'Discord Voice',
+          durationSeconds: parseDurationToSeconds(data.track.durationText),
+          url: data.track.videoUrl || '',
+          thumbnailUrl: data.track.thumbnail || '',
+          requestedBy: data.track.requestedBy || 'Web/App Admin',
+          genre: 'Discord Voice',
+          lyrics: []
+        };
+        onAddTrack(resolved);
+        setShowAddSuccess(true);
+        setSearchQuery('');
+        setTimeout(() => setShowAddSuccess(false), 3000);
+      }
+    } catch {}
   };
-
-  const eqPresets = [
-    { id: 'FLAT', name: 'Chuẩn (Flat)' },
-    { id: 'BASS_BOOST', name: 'Tăng Bass (Bass Boost)' },
-    { id: 'VOCAL', name: 'Giọng Hát (Vocal)' },
-    { id: 'LOFI', name: 'Thư Giãn (Lo-Fi)' },
-    { id: 'NIGHTCORE', name: 'Nightcore' },
-    { id: 'ACOUSTIC', name: 'Acoustic Mộc' }
-  ];
 
   return (
     <div className="space-y-6">
@@ -329,7 +323,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
               </div>
             </div>
 
-            {/* Audio Wave Visualizer Simulation */}
+            {/* Audio Wave Visualizer */}
             <div className="mt-6 flex items-end justify-center sm:justify-start gap-1 h-8 px-2">
               {[40, 65, 85, 30, 95, 50, 70, 90, 45, 60, 80, 55, 75, 90, 40, 70, 85, 60, 95, 50].map((height, i) => (
                 <div
@@ -352,6 +346,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
                 max={currentTrack?.durationSeconds || 100}
                 value={currentTime}
                 onChange={handleSeek}
+                disabled
                 className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                 aria-label="Thanh trượt thời gian bài hát"
               />
@@ -385,10 +380,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    onPlayPause();
-                    handleControlRealVoice('pause');
-                  }}
+                  onClick={onPlayPause}
                   className="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow-lg shadow-indigo-600/30 transition-transform active:scale-95"
                   aria-label={isPlaying ? 'Tạm dừng' : 'Phát tiếp'}
                 >
@@ -396,10 +388,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    onNextTrack();
-                    handleControlRealVoice('skip');
-                  }}
+                  onClick={onNextTrack}
                   className="p-2 text-slate-300 hover:text-white transition-colors"
                   title="Bài tiếp theo"
                   aria-label="Bài tiếp theo"
@@ -461,7 +450,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Tìm bài hát từ YouTube, Spotify hoặc dán link nhạc..."
+                placeholder="Tìm bài hát YouTube hoặc dán link audio trực tiếp..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
               />
             </div>

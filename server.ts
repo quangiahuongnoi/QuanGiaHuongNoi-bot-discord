@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
@@ -108,6 +108,9 @@ interface GuildVoiceSession {
   isPaused: boolean;
   stay247: boolean;
   volume: number;
+  loopMode: 'OFF' | 'TRACK' | 'QUEUE';
+  filterPreset: 'FLAT' | 'BASS_BOOST' | 'VOCAL' | 'NIGHTCORE' | 'LOFI' | 'ACOUSTIC';
+  audioProcess?: any;
 }
 
 const guildVoiceSessions = new Map<string, GuildVoiceSession>();
@@ -148,6 +151,7 @@ const messageHourlyCounts = Array.from({ length: 24 }, () => 0);
 const voiceHourlyMinutes = Array.from({ length: 24 }, () => 0);
 const channelMessageCounts = new Map<string, number>();
 const memberJoinEvents: number[] = [];
+const memberLeaveEvents: number[] = [];
 const moderationStats = { warns: 0, timeouts: 0, kicks: 0, bans: 0 };
 const voiceJoinTimes = new Map<string, number>();
 
@@ -194,6 +198,7 @@ function buildPersistedRuntimeState() {
       voiceHourlyMinutes: voiceHourlyMinutes.slice(0, 24),
       channelMessageCounts: Array.from(channelMessageCounts.entries()),
       memberJoinEvents: memberJoinEvents.slice(-5000),
+      memberLeaveEvents: memberLeaveEvents.slice(-5000),
       moderationStats: { ...moderationStats }
     }
   };
@@ -284,6 +289,11 @@ async function hydrateRuntimeFromPersistence() {
       memberJoinEvents.length,
       ...(Array.isArray(analytics.memberJoinEvents) ? analytics.memberJoinEvents.slice(-5000).map(Number) : [])
     );
+    memberLeaveEvents.splice(
+      0,
+      memberLeaveEvents.length,
+      ...(Array.isArray(analytics.memberLeaveEvents) ? analytics.memberLeaveEvents.slice(-5000).map(Number) : [])
+    );
     if (analytics.moderationStats && typeof analytics.moderationStats === 'object') {
       const savedModeration = analytics.moderationStats as any;
       moderationStats.warns = Number(savedModeration.warns) || 0;
@@ -353,12 +363,11 @@ async function resolveAudioStreamForQuery(
     console.warn('[YouTube Metadata Lookup Notice]:', err?.message);
   }
 
-  // 2. Tier 1: Try direct @distube/ytdl-core stream URL if YouTube allows this IP
+  // 2. Resolve the requested YouTube audio directly. Do not substitute previews or unrelated radio streams.
   try {
     const info = await ytdlClient.getInfo(videoUrl);
-    const audioFormat = info.formats?.find(
-      (f: any) => f.hasAudio && !f.hasVideo && f.url
-    ) || info.formats?.find((f: any) => f.hasAudio && f.url);
+    const audioFormat = info.formats?.find((f: any) => f.hasAudio && !f.hasVideo && f.url) ||
+      info.formats?.find((f: any) => f.hasAudio && f.url);
     if (audioFormat?.url) {
       return {
         title: info.videoDetails?.title || title,
@@ -368,61 +377,14 @@ async function resolveAudioStreamForQuery(
         thumbnail,
         durationText,
         requestedBy,
-        sourceLabel: 'YouTube Direct Opus/AAC'
+        sourceLabel: 'YouTube Direct Audio'
       };
     }
-  } catch {
-    // Expected on Cloud Run datacenter IPs where YouTube enforces bot-check
+  } catch (err: any) {
+    console.warn('[YouTube Audio Lookup Notice]:', err?.message || 'Unable to resolve audio');
   }
 
-  // 3. Tier 2: Resolve Hi-Fi AAC stream via Apple Music / iTunes VN & Global Search API
-  const cleanedSearch = cleanYouTubeTitleForAudioSearch(title, author);
-  const searchCandidates = [
-    cleanedSearch,
-    `${author} ${cleanedSearch}`.slice(0, 60),
-    query.replace(/https?:\/\/\S+/g, '').trim()
-  ].filter(Boolean);
-
-  for (const term of searchCandidates) {
-    for (const country of ['VN', 'US']) {
-      try {
-        const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(
-          term
-        )}&country=${country}&media=music&limit=3`;
-        const res = await fetch(itunesUrl, { signal: AbortSignal.timeout(4000) });
-        if (res.ok) {
-          const data: any = await res.json();
-          const match = data.results?.find((item: any) => item.previewUrl);
-          if (match?.previewUrl) {
-            return {
-              title,
-              author: match.artistName || author,
-              videoUrl,
-              streamUrl: match.previewUrl,
-              thumbnail: thumbnail || match.artworkUrl100?.replace('100x100', '400x400'),
-              durationText,
-              requestedBy,
-              sourceLabel: 'Hi-Fi AAC Audio Stream'
-            };
-          }
-        }
-      } catch {
-        // Ignore and try next candidate
-      }
-    }
-  }
-
-  // 4. Tier 3: Reliable 24/7 Chill / Lo-Fi Music Stream so the bot always plays audio in Voice
-  return {
-    title,
-    author,
-    videoUrl,
-    streamUrl: 'https://streams.ilovemusic.de/iloveradio17.mp3',
-    thumbnail,
-    durationText: '24/7 Stream',
-    requestedBy,
-    sourceLabel: '24/7 Hi-Fi Radio Stream'
-  };
+  throw new Error('Không thể lấy audio đầy đủ của bài hát từ YouTube tại thời điểm này. Không dùng preview ngắn hoặc stream bài khác làm fallback.');
 }
 
 /**
@@ -486,40 +448,47 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
   if (session.currentTrack && session.currentTrack.videoUrl !== track.videoUrl) {
     session.history = [session.currentTrack, ...session.history].slice(0, 20);
   }
+
   session.currentTrack = track;
   session.isPaused = false;
 
-  try {
-    let resource;
-    if (track.streamUrl.startsWith('http://') || track.streamUrl.startsWith('https://')) {
-      const res = await fetch(track.streamUrl);
-      if (!res.ok || !res.body) {
-        throw new Error(`Stream HTTP ${res.status}`);
-      }
-      const nodeStream = Readable.fromWeb(res.body as any);
-      resource = createAudioResource(nodeStream, {
-        inlineVolume: true,
-        inputType: StreamType.Arbitrary
-      });
-    } else {
-      resource = createAudioResource(track.streamUrl, {
-        inlineVolume: true
-      });
-    }
+  if (session.audioProcess) {
+    try { session.audioProcess.kill('SIGKILL'); } catch {}
+    session.audioProcess = undefined;
+  }
 
-    if (resource.volume) {
-      resource.volume.setVolume(session.volume / 100);
+  try {
+    const response = await fetch(track.streamUrl);
+    if (!response.ok || !response.body) throw new Error(`Stream HTTP ${response.status}`);
+
+    const nodeStream = Readable.fromWeb(response.body as any);
+    let inputStream: any = nodeStream;
+    let inputType = StreamType.Arbitrary;
+    const filters: Record<string, string> = {
+      BASS_BOOST: 'bass=g=8',
+      VOCAL: 'highpass=f=120,equalizer=f=3000:t=q:w=1:g=4',
+      NIGHTCORE: 'asetrate=60000,aresample=48000',
+      LOFI: 'lowpass=f=5000,bass=g=3',
+      ACOUSTIC: 'highpass=f=60,equalizer=f=2000:t=q:w=1:g=2'
+    };
+    const filter = filters[session.filterPreset];
+    if (filter) {
+      const ffmpeg = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-af', filter, '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'], { stdio: ['pipe', 'pipe', 'ignore'] });
+      ffmpeg.stdin.on('error', () => {});
+      nodeStream.pipe(ffmpeg.stdin);
+      session.audioProcess = ffmpeg;
+      inputStream = ffmpeg.stdout;
+      inputType = StreamType.Raw;
     }
+    const resource = createAudioResource(inputStream, { inlineVolume: true, inputType });
+    if (resource.volume) resource.volume.setVolume(session.volume / 100);
     session.currentResource = resource;
     session.player.play(resource);
   } catch (err: any) {
     console.warn(`[Audio Stream Notice in ${session.channelName}]:`, err?.message);
     const nextTrack = session.queue.shift();
-    if (nextTrack) {
-      await playTrackInSession(session, nextTrack);
-    } else {
-      session.currentTrack = null;
-    }
+    if (nextTrack) await playTrackInSession(session, nextTrack);
+    else { session.currentTrack = null; session.currentResource = undefined; }
   }
 }
 
@@ -556,17 +525,33 @@ async function ensureVoiceSession(
       currentResource: undefined,
       isPaused: false,
       stay247: true,
-      volume: 85
+      volume: 85,
+      loopMode: 'OFF',
+      filterPreset: 'FLAT'
     };
 
     player.on(AudioPlayerStatus.Idle, async () => {
       const currentSession = guildVoiceSessions.get(guild.id);
       if (!currentSession) return;
+      if (currentSession.audioProcess) {
+        try { currentSession.audioProcess.kill('SIGKILL'); } catch {}
+        currentSession.audioProcess = undefined;
+      }
+      if (currentSession.loopMode === 'TRACK' && currentSession.currentTrack) {
+        await playTrackInSession(currentSession, currentSession.currentTrack);
+        return;
+      }
+      if (currentSession.currentTrack && currentSession.loopMode === 'QUEUE') currentSession.queue.push(currentSession.currentTrack);
       const nextTrack = currentSession.queue.shift();
       if (nextTrack) {
         await playTrackInSession(currentSession, nextTrack);
       } else {
         currentSession.currentTrack = null;
+        currentSession.currentResource = undefined;
+        if (!currentSession.stay247) {
+          currentSession.connection.destroy();
+          guildVoiceSessions.delete(guild.id);
+        }
       }
     });
 
@@ -624,6 +609,7 @@ async function startDiscordBotIfConfigured() {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildPresences,
         GatewayIntentBits.GuildVoiceStates
       ],
       partials: [Partials.Message, Partials.Channel]
@@ -886,6 +872,18 @@ async function startDiscordBotIfConfigured() {
       }
     });
 
+    client.on('guildMemberRemove', (member) => {
+      memberLeaveEvents.push(Date.now());
+      while (memberLeaveEvents.length > 5000) memberLeaveEvents.shift();
+      appendLog({
+        actionType: 'MEMBER_LEAVE',
+        executor: { name: 'AegisBot [Live]', isBot: true },
+        target: { name: member.user.tag, id: member.id },
+        details: 'Thành viên rời server "' + member.guild.name + '".',
+        severity: 'info'
+      });
+      scheduleRuntimePersistence();
+    });
     // Real-time Auto-Mod, Real Voice Music Engine, 24+ Commands & Auto-Responder
     client.on('messageCreate', async (message) => {
       if (message.author.bot || !message.guild) return;
@@ -902,29 +900,32 @@ async function startDiscordBotIfConfigured() {
       if (liveConfig.modulesEnabled.moderation) {
         const modCheck = checkModeration(content, liveConfig.autoModConfig);
         if (modCheck.hasViolation) {
-          await message.delete().catch(() => {});
-          const warnEmbed = new EmbedBuilder()
-            .setColor(0xef4444)
-            .setTitle('🛡️ Hệ Thống Auto-Mod Bảo Vệ Máy Chủ')
-            .setDescription(`${message.author}, tin nhắn của bạn đã bị thu hồi tự động.\n**Lý do:** ${modCheck.reason}`)
-            .setFooter({ text: 'AegisBot Live Security Shield' });
-
-          if ('send' in message.channel) {
-            await message.channel.send({ embeds: [warnEmbed] }).catch(() => {});
+          let actionTaken = modCheck.recommendedAction;
+          if (actionTaken !== 'WARN') await message.delete().catch(() => {});
+          if (actionTaken === 'MUTE' && message.member?.moderatable) {
+            await message.member.timeout(10 * 60 * 1000, modCheck.reason || 'Auto-Mod violation').catch(() => { actionTaken = 'WARN'; });
           }
-
+          if (actionTaken === 'KICK' && message.member?.kickable) {
+            await message.member.kick(modCheck.reason || 'Auto-Mod violation').catch(() => { actionTaken = 'WARN'; });
+          }
+          const actionLabel = actionTaken === 'MUTE' ? 'Timeout 10 phút' : actionTaken === 'KICK' ? 'Kick' : actionTaken === 'DELETE' ? 'Xóa tin nhắn' : 'Cảnh cáo';
+          const warnEmbed = new EmbedBuilder()
+            .setColor(actionTaken === 'KICK' ? 0xdc2626 : 0xef4444)
+            .setTitle('🛡️ Hệ Thống Auto-Mod Bảo Vệ Máy Chủ')
+            .setDescription(message.author + ', hệ thống đã xử lý tin nhắn vi phạm.\n**Lý do:** ' + (modCheck.reason || 'Không rõ') + '\n**Hành động:** ' + actionLabel)
+            .setFooter({ text: 'AegisBot Live Security Shield' });
+          if ('send' in message.channel) await message.channel.send({ embeds: [warnEmbed] }).catch(() => {});
           appendLog({
-            actionType: 'MEMBER_WARN',
+            actionType: actionTaken === 'MUTE' ? 'MEMBER_TIMEOUT' : actionTaken === 'KICK' ? 'MEMBER_KICK' : 'MEMBER_WARN',
             executor: { name: 'AegisBot [Auto-Mod]', isBot: true },
             target: { name: message.author.tag, id: message.author.id },
-            details: `Thu hồi tin nhắn vi phạm trên server thật: ${modCheck.reason}`,
-            severity: 'warning',
-            channelName: `#${channelName}`
+            details: actionLabel + ': ' + (modCheck.reason || 'Auto-Mod violation'),
+            severity: actionTaken === 'KICK' ? 'danger' : 'warning',
+            channelName: '#' + channelName
           });
           return;
         }
       }
-
       // 2. Check if message is a Command (! or /)
       const parsedCmd = parseCommandInput(content);
       if (parsedCmd.isCommand) {
@@ -965,23 +966,31 @@ async function startDiscordBotIfConfigured() {
           // Handle !join or !247
           if (cmdName === 'join' || cmdName === '247') {
             const session = await ensureVoiceSession(message.guild, targetVoice);
-            session.stay247 = true;
+            const stay247 = cmdName === 'join' ? true : String(parsedCmd.args[0] || 'on').toLowerCase() !== 'off';
+            session.stay247 = stay247;
+            if (!stay247 && !session.currentTrack && session.queue.length === 0) {
+              session.connection.destroy();
+              guildVoiceSessions.delete(message.guild.id);
+            }
             const joinEmbed = new EmbedBuilder()
-              .setColor(0x10b981)
-              .setTitle(`🔊 Đã Vào Phòng Thoại: ${targetVoice.name}`)
-              .setDescription(
-                `Bot đã tự động kết nối vào phòng **🔊 ${targetVoice.name}** cùng **${authorDisplay}**!\n• Chế độ treo 24/7: **Đang bật**\n• Gõ \`!play <tên bài hát hoặc link YouTube>\` để phát nhạc ngay.`
-              )
+              .setColor(stay247 ? 0x10b981 : 0xf59e0b)
+              .setTitle('🔊 ' + (stay247 ? 'Đã vào' : 'Đã tắt 24/7') + ' phòng thoại: ' + targetVoice.name)
+              .setDescription('Kết nối: **🔊 ' + targetVoice.name + '**\n• Chế độ treo 24/7: **' + (stay247 ? 'Đang bật' : 'Đang tắt') + '**')
               .setFooter({ text: 'AegisBot Real Voice Engine (@discordjs/voice)' });
             await message.reply({ embeds: [joinEmbed] });
             return;
           }
-
           // Handle !play <url / song name>
           if (cmdName === 'play') {
             const songQuery = parsedCmd.rawArgs || 'Chìm Sâu RPT MCK';
             const session = await ensureVoiceSession(message.guild, targetVoice);
-            const resolvedTrack = await resolveAudioStreamForQuery(songQuery, authorDisplay);
+            let resolvedTrack: ResolvedPlayableTrack;
+            try {
+              resolvedTrack = await resolveAudioStreamForQuery(songQuery, authorDisplay);
+            } catch (err: any) {
+              await message.reply('❌ Không thể phát bài hát này: ' + (err?.message || 'Không lấy được audio đầy đủ.'));
+              return;
+            }
 
             const isAlreadyPlaying =
               session.player.state.status === AudioPlayerStatus.Playing && session.currentTrack !== null;
@@ -1090,10 +1099,10 @@ async function startDiscordBotIfConfigured() {
           if (cmdName === 'volume') {
             const vol = Math.min(100, Math.max(0, parseInt(parsedCmd.args[0] || '85', 10) || 85));
             const session = guildVoiceSessions.get(message.guild.id);
-            if (session) {
-              session.volume = vol;
-            }
-            await message.reply(`🔊 Đã đặt âm lượng phát nhạc tại **${targetVoice.name}** thành **${vol}%**.`);
+            if (!session) { await message.reply('⚠️ Bot chưa có phiên Voice đang hoạt động.'); return; }
+            session.volume = vol;
+            if (session.currentResource?.volume) session.currentResource.volume.setVolume(vol / 100);
+            await message.reply('🔊 Đã đặt âm lượng phát nhạc tại **' + session.channelName + '** thành **' + vol + '%**.');
             return;
           }
 
@@ -2203,7 +2212,9 @@ async function startServer() {
                     isPaused: voiceSession.isPaused,
                     queue: voiceSession.queue,
                     queueLength: voiceSession.queue.length,
-                    volume: voiceSession.volume
+                    volume: voiceSession.volume,
+                    loopMode: voiceSession.loopMode,
+                    filterPreset: voiceSession.filterPreset
                   }
                 : null
             };
@@ -2278,12 +2289,13 @@ async function startServer() {
           return res.json({ ok: true, message: 'Bot hiện không ở trong kênh Voice nào.' });
         }
         existingSession.player.stop();
+        if (existingSession.audioProcess) { try { existingSession.audioProcess.kill('SIGKILL'); } catch {} }
         existingSession.connection.destroy();
         guildVoiceSessions.delete(targetGuild.id);
         return res.json({ ok: true, message: 'Bot đã rời khỏi kênh Voice.' });
       }
 
-      if (action === 'pause' || action === 'skip' || action === 'previous' || action === 'prev' || action === 'volume') {
+      if (action === 'pause' || action === 'skip' || action === 'previous' || action === 'prev' || action === 'volume' || action === 'loop' || action === 'shuffle' || action === 'filter') {
         if (!existingSession) {
           return res.status(404).json({
             ok: false,
@@ -2354,6 +2366,28 @@ async function startServer() {
           });
         }
 
+        if (action === 'loop') {
+          const mode = String(req.body.mode || 'TRACK').toUpperCase();
+          if (!['OFF', 'TRACK', 'QUEUE'].includes(mode)) return res.status(400).json({ ok: false, error: 'Loop mode không hợp lệ.' });
+          existingSession.loopMode = mode as 'OFF' | 'TRACK' | 'QUEUE';
+          return res.json({ ok: true, loopMode: existingSession.loopMode, message: 'Đã đặt Loop: ' + existingSession.loopMode });
+        }
+
+        if (action === 'shuffle') {
+          for (let i = existingSession.queue.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [existingSession.queue[i], existingSession.queue[j]] = [existingSession.queue[j], existingSession.queue[i]];
+          }
+          return res.json({ ok: true, queue: existingSession.queue, queueLength: existingSession.queue.length, message: 'Đã xáo trộn hàng đợi thật trên Discord Voice.' });
+        }
+
+        if (action === 'filter') {
+          const normalized = String(req.body.preset || 'FLAT').toUpperCase();
+          if (!['FLAT', 'BASS_BOOST', 'VOCAL', 'NIGHTCORE', 'LOFI', 'ACOUSTIC'].includes(normalized)) return res.status(400).json({ ok: false, error: 'Equalizer preset không hợp lệ.' });
+          existingSession.filterPreset = normalized as any;
+          if (existingSession.currentTrack) await playTrackInSession(existingSession, existingSession.currentTrack);
+          return res.json({ ok: true, filterPreset: existingSession.filterPreset, message: 'Đã áp dụng Equalizer: ' + existingSession.filterPreset });
+        }
         const vol = typeof req.body.volume === 'number'
           ? Math.max(0, Math.min(100, req.body.volume))
           : 80;
@@ -2469,6 +2503,12 @@ async function startServer() {
       const key = new Date(ts).toLocaleDateString('vi-VN');
       const bucket = dayMap.get(key) || { joins: 0, leaves: 0 };
       bucket.joins += 1;
+      dayMap.set(key, bucket);
+    }
+    for (const ts of memberLeaveEvents) {
+      const key = new Date(ts).toLocaleDateString('vi-VN');
+      const bucket = dayMap.get(key) || { joins: 0, leaves: 0 };
+      bucket.leaves += 1;
       dayMap.set(key, bucket);
     }
     const memberGrowth = Array.from({ length: 30 }, (_, idx) => {

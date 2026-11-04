@@ -29,7 +29,7 @@ import {
 } from './bot/initialData';
 import { AutoResponseRule } from './bot/logic/autoResponder';
 import { AutoModConfig } from './bot/logic/moderationRules';
-import { Track, LoopMode, getNextTrackIndex, getPreviousTrackIndex, shuffleArray } from './bot/logic/musicQueue';
+import { Track, LoopMode, getNextTrackIndex, getPreviousTrackIndex } from './bot/logic/musicQueue';
 import { LevelRoleRule } from './bot/logic/roleEngine';
 import {
   INITIAL_DISCORD_COMMANDS,
@@ -246,6 +246,31 @@ export default function App() {
                 setMembers(currentGuild.members);
               }
             }
+            if (currentGuild.activeVoice) {
+              const activeVoice = currentGuild.activeVoice;
+              setIsPlaying(Boolean(activeVoice.currentTrack && !activeVoice.isPaused));
+              if (typeof activeVoice.volume === 'number') setVolume(activeVoice.volume);
+              if (activeVoice.loopMode) setLoopMode(activeVoice.loopMode);
+              if (activeVoice.filterPreset) setEqualizerPreset(activeVoice.filterPreset);
+              const resolvedTracks = [
+                ...(activeVoice.currentTrack ? [activeVoice.currentTrack] : []),
+                ...(Array.isArray(activeVoice.queue) ? activeVoice.queue : [])
+              ].map((track: any, index: number) => ({
+                id: `discord-${track.videoUrl || index}-${index}`,
+                title: track.title || 'Bài hát',
+                artist: track.author || 'Discord Voice',
+                durationSeconds: parseDurationToSeconds(track.durationText),
+                url: track.videoUrl || '',
+                thumbnailUrl: track.thumbnail || '',
+                requestedBy: track.requestedBy || 'Discord',
+                genre: 'Discord Voice',
+                lyrics: []
+              }));
+              if (resolvedTracks.length > 0) {
+                setTracks(resolvedTracks);
+                setCurrentTrackIndex(0);
+              }
+            }
             if (Array.isArray(data.recentLogs) && data.recentLogs.length > 0) {
               setAuditLogs(data.recentLogs);
             }
@@ -307,7 +332,7 @@ export default function App() {
 
   // Music handlers: control the real Discord voice engine, then mirror UI state.
   const controlVoiceFromDashboard = async (
-    action: 'pause' | 'skip' | 'previous' | 'volume',
+    action: 'pause' | 'skip' | 'previous' | 'volume' | 'loop' | 'shuffle' | 'filter',
     payload: Record<string, unknown> = {}
   ) => {
     const res = await fetch('/api/bot/voice-control', {
@@ -371,18 +396,35 @@ export default function App() {
     }
   };
 
-  const handleToggleLoop = () => {
-    setLoopMode(prev => {
-      if (prev === 'OFF') return 'TRACK';
-      if (prev === 'TRACK') return 'QUEUE';
-      return 'OFF';
-    });
+  const handleToggleLoop = async () => {
+    const next = loopMode === 'OFF' ? 'TRACK' : loopMode === 'TRACK' ? 'QUEUE' : 'OFF';
+    try {
+      const data = await controlVoiceFromDashboard('loop', { mode: next });
+      setLoopMode(data.loopMode || next);
+    } catch {}
   };
 
-  const handleShuffle = () => {
-    const shuffled = shuffleArray(tracks, currentTrackIndex);
-    setTracks(shuffled);
-    setCurrentTrackIndex(0);
+  const handleShuffle = async () => {
+    try {
+      const data = await controlVoiceFromDashboard('shuffle');
+      if (Array.isArray(data.queue)) {
+        const shuffled = data.queue.map((track: any, index: number) => ({
+          id: `discord-${track.videoUrl || index}-${Date.now()}-${index}`,
+          title: track.title || 'Bài hát',
+          artist: track.author || 'Discord Voice',
+          durationSeconds: parseDurationToSeconds(track.durationText),
+          url: track.videoUrl || '',
+          thumbnailUrl: track.thumbnail || '',
+          requestedBy: track.requestedBy || 'Discord',
+          genre: 'Discord Voice',
+          lyrics: []
+        }));
+        setTracks(prev => {
+          const current = prev[currentTrackIndex];
+          return current ? [current, ...shuffled] : shuffled;
+        });
+      }
+    } catch {}
   };
 
   const handleAddTrack = (track: Track) => {
@@ -716,7 +758,12 @@ export default function App() {
                   setVolume(vol);
                   try { await controlVoiceFromDashboard('volume', { volume: vol }); } catch {}
                 }}
-                onSetEqualizer={(eq) => setEqualizerPreset(eq)}
+                onSetEqualizer={async (eq) => {
+                  try {
+                    const data = await controlVoiceFromDashboard('filter', { preset: eq });
+                    setEqualizerPreset(data.filterPreset || eq);
+                  } catch {}
+                }}
                 onAddTrack={handleAddTrack}
                 onRemoveTrack={handleRemoveTrack}
                 guild={activeGuild}
