@@ -7,6 +7,7 @@ import {
   Send, 
   Check, 
   ExternalLink, 
+  Pencil, 
   Radio, 
   Sparkles,
   Bell
@@ -22,6 +23,8 @@ interface SocialFeedsViewProps {
   onAddTikTokFeed: (feed: TikTokFeed) => void;
   onRemoveTikTokFeed: (id: string) => void;
   onToggleTikTokFeed: (id: string) => void;
+  onUpdateYouTubeFeed: (feed: YouTubeFeed) => void;
+  onUpdateTikTokFeed: (feed: TikTokFeed) => void;
   onTestNotification: (platform: 'youtube' | 'tiktok', title: string, url: string, channelName: string) => void;
   guild: GuildInfo;
 }
@@ -35,6 +38,8 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
   onAddTikTokFeed,
   onRemoveTikTokFeed,
   onToggleTikTokFeed,
+  onUpdateYouTubeFeed,
+  onUpdateTikTokFeed,
   onTestNotification,
   guild
 }) => {
@@ -42,6 +47,10 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [testNotificationSent, setTestNotificationSent] = useState<string | null>(null);
   const [monitorChecking, setMonitorChecking] = useState(false);
+  const [editingRouting, setEditingRouting] = useState<{
+    platform: 'youtube' | 'tiktok';
+    feed: YouTubeFeed | TikTokFeed;
+  } | null>(null);
 
   // Form states
   const [ytName, setYtName] = useState('');
@@ -68,6 +77,30 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
   const getRoleLabel = (roleId?: string) => {
     const role = roleId ? roles.find((item) => item.id === roleId) : undefined;
     return role ? `@${role.name}` : roleId ? `Role ID ${roleId}` : 'Không ping role';
+  };
+
+  const openRoutingEditor = (platform: 'youtube' | 'tiktok', feed: YouTubeFeed | TikTokFeed) => {
+    setEditingRouting({ platform, feed });
+  };
+
+  const saveRouting = (discordChannelId: string, pingRoleId?: string) => {
+    if (!editingRouting) return;
+
+    const nextFeed = {
+      ...editingRouting.feed,
+      discordChannelId,
+      pingRoleId: pingRoleId || undefined
+    };
+
+    if (editingRouting.platform === 'youtube') {
+      onUpdateYouTubeFeed(nextFeed as YouTubeFeed);
+    } else {
+      onUpdateTikTokFeed(nextFeed as TikTokFeed);
+    }
+
+    setEditingRouting(null);
+    setTestNotificationSent('Đã lưu kênh Discord đích và role ping.');
+    setTimeout(() => setTestNotificationSent(null), 3500);
   };
 
   const handleCreateFeed = (e: React.FormEvent) => {
@@ -269,12 +302,21 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => onRemoveYouTubeFeed(feed.id)}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors"
-                  title="Xóa kênh theo dõi"
-                >
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => openRoutingEditor('youtube', feed)}
+                    className="p-1.5 text-slate-500 hover:text-indigo-400 transition-colors"
+                    title="Chỉnh kênh Discord đích và role ping"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveYouTubeFeed(feed.id)}
+                    className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors"
+                    title="Xóa kênh theo dõi"
+                  >
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -348,12 +390,21 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => onRemoveTikTokFeed(feed.id)}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors"
-                  title="Xóa kênh theo dõi"
-                >
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => openRoutingEditor('tiktok', feed)}
+                    className="p-1.5 text-slate-500 hover:text-indigo-400 transition-colors"
+                    title="Chỉnh kênh Discord đích và role ping"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveTikTokFeed(feed.id)}
+                    className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors"
+                    title="Xóa kênh theo dõi"
+                  >
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
@@ -406,6 +457,20 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
           ))
         )}
       </div>
+
+      {/* Edit notification routing modal */}
+      {editingRouting && (
+        <NotificationRoutingModal
+          platform={editingRouting.platform}
+          feed={editingRouting.feed}
+          textChannels={textChannels}
+          roles={roles}
+          onClose={() => setEditingRouting(null)}
+          onSave={saveRouting}
+          getChannelLabel={getChannelLabel}
+          getRoleLabel={getRoleLabel}
+        />
+      )}
 
       {/* Add Feed Modal */}
       {showAddModal && (
@@ -535,6 +600,104 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+
+interface NotificationRoutingModalProps {
+  platform: 'youtube' | 'tiktok';
+  feed: YouTubeFeed | TikTokFeed;
+  textChannels: GuildInfo['channels'];
+  roles: GuildInfo['roles'];
+  onClose: () => void;
+  onSave: (discordChannelId: string, pingRoleId?: string) => void;
+  getChannelLabel: (channelId: string) => string;
+  getRoleLabel: (roleId?: string) => string;
+}
+
+const NotificationRoutingModal: React.FC<NotificationRoutingModalProps> = ({
+  platform,
+  feed,
+  textChannels,
+  roles,
+  onClose,
+  onSave
+}) => {
+  const [channelId, setChannelId] = useState(feed.discordChannelId || textChannels[0]?.id || '');
+  const [roleId, setRoleId] = useState(feed.pingRoleId || '');
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-5">
+        <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-800">
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Pencil className="w-4 h-4 text-indigo-400" />
+              Chỉnh thông báo {platform === 'youtube' ? 'YouTube' : 'TikTok'}
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {platform === 'youtube'
+                ? (feed as YouTubeFeed).channelName
+                : (feed as TikTokFeed).creatorHandle}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white text-xs">
+            ✕
+          </button>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-300 mb-1.5">Kênh Discord nhận thông báo</label>
+          <select
+            value={channelId}
+            onChange={(e) => setChannelId(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">Không chọn — dùng kênh fallback</option>
+            {textChannels.map((channel) => (
+              <option key={channel.id} value={channel.id}>#{channel.name}</option>
+            ))}
+          </select>
+          <p className="text-[10px] text-slate-500 mt-1">
+            Kênh này sẽ được dùng cho cả thông báo Live và video mới.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-300 mb-1.5">Role được ping</label>
+          <select
+            value={roleId}
+            onChange={(e) => setRoleId(e.target.value)}
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+          >
+            <option value="">Không ping role</option>
+            {roles.map((role) => (
+              <option key={role.id} value={role.id}>@{role.name}</option>
+            ))}
+          </select>
+          <p className="text-[10px] text-slate-500 mt-1">
+            Nếu chọn role, bot sẽ mention role đó khi gửi thông báo.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+          >
+            Hủy
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(channelId, roleId || undefined)}
+            className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+          >
+            Lưu thay đổi
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
