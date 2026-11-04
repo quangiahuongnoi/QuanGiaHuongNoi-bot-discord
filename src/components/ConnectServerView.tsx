@@ -128,7 +128,7 @@ export const ConnectServerView: React.FC<ConnectServerViewProps> = ({
   const [directSendStatus, setDirectSendStatus] = useState<string | null>(null);
 
   // 24/7 Keep-Alive & Uptime Monitor state
-  const [uptimeSeconds, setUptimeSeconds] = useState<number>(86415);
+  const [uptimeSeconds, setUptimeSeconds] = useState<number>(0);
   const [keepAliveEnabled, setKeepAliveEnabled] = useState<boolean>(true);
   const [voice247Enabled, setVoice247Enabled] = useState<boolean>(true);
   const [copiedHealthUrl, setCopiedHealthUrl] = useState<boolean>(false);
@@ -143,7 +143,7 @@ export const ConnectServerView: React.FC<ConnectServerViewProps> = ({
       if (healthRes && healthRes.ok) {
         const hData = await healthRes.json();
         if (typeof hData.uptimeSeconds === 'number') {
-          setUptimeSeconds(86400 + hData.uptimeSeconds);
+          setUptimeSeconds(hData.uptimeSeconds);
         }
       }
       if (res.ok) {
@@ -447,8 +447,7 @@ export const ConnectServerView: React.FC<ConnectServerViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                Máy chủ ứng dụng này đã tích hợp sẵn nhân <strong>Discord.js v14</strong> thật ở phía Backend. Khi bạn thêm biến môi trường{' '}
-                <code className="text-indigo-300 font-mono">DISCORD_BOT_TOKEN</code> trong bảng <strong>Secrets</strong> của AI Studio (hoặc tải code về chạy trên VPS/máy tính), bot sẽ tự động online 24/7 trên máy chủ Discord của bạn.
+                Máy chủ ứng dụng này đã tích hợp sẵn nhân <strong>Discord.js v14</strong> thật ở phía Backend. Trên Render, token nên được lưu bằng Environment Variables với các biến <code className="text-indigo-300 font-mono">DISCORD_BOT_TOKEN</code> và <code className="text-indigo-300 font-mono">DISCORD_CLIENT_ID</code>; không lưu secret vào source code.
               </p>
               {liveStatus?.error && (
                 <div className="mt-2 text-xs text-rose-400 flex items-center gap-1.5">
