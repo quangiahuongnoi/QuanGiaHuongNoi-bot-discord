@@ -1082,6 +1082,10 @@ async function startDiscordBotIfConfigured() {
             description: 'Bỏ qua bài hát hiện tại để phát bài kế tiếp'
           },
           {
+            name: 'stop',
+            description: 'Dừng nhạc và xóa toàn bộ hàng đợi'
+          },
+          {
             name: 'queue',
             description: 'Xem danh sách bài hát đang chờ phát'
           },
@@ -1179,6 +1183,26 @@ async function startDiscordBotIfConfigured() {
               await playTrackInSession(session, track);
               await interaction.editReply(`🎵 Đang phát: **${track.title}** tại 🔊 **${targetVoice.name}**!`);
             }
+            return;
+          }
+
+          if (commandName === 'stop') {
+            if (!interaction.guild) return;
+            const session = guildVoiceSessions.get(interaction.guild.id);
+            if (!session) {
+              await interaction.reply('ℹ️ Bot hiện không phát nhạc.');
+              return;
+            }
+            const channelName = session.channelName;
+            session.transitioning = true;
+            session.queueGeneration += 1;
+            session.queue = [];
+            session.currentTrack = null;
+            session.currentResource = undefined;
+            try { session.player.stop(true); } catch {}
+            if (session.audioProcess) { try { session.audioProcess.kill('SIGKILL'); } catch {} session.audioProcess = undefined; }
+            session.transitioning = false;
+            await interaction.reply(`⏹️ Đã dừng phát nhạc và xóa hàng đợi tại **🔊 ${channelName}**.`);
             return;
           }
 
@@ -2883,12 +2907,25 @@ async function startServer() {
         return res.json({ ok: true, message: 'Bot đã rời khỏi kênh Voice.' });
       }
 
-      if (action === 'pause' || action === 'skip' || action === 'previous' || action === 'prev' || action === 'volume' || action === 'loop' || action === 'shuffle' || action === 'filter' || action === 'remove') {
+      if (action === 'pause' || action === 'skip' || action === 'stop' || action === 'previous' || action === 'prev' || action === 'volume' || action === 'loop' || action === 'shuffle' || action === 'filter' || action === 'remove') {
         if (!existingSession) {
           return res.status(404).json({
             ok: false,
             error: 'Bot chưa có phiên Voice đang hoạt động trên máy chủ này.'
           });
+        }
+
+        if (action === 'stop') {
+          const channelName = existingSession.channelName;
+          existingSession.transitioning = true;
+          existingSession.queueGeneration += 1;
+          existingSession.queue = [];
+          existingSession.currentTrack = null;
+          existingSession.currentResource = undefined;
+          try { existingSession.player.stop(true); } catch {}
+          if (existingSession.audioProcess) { try { existingSession.audioProcess.kill('SIGKILL'); } catch {} existingSession.audioProcess = undefined; }
+          existingSession.transitioning = false;
+          return res.json({ ok: true, message: `Đã dừng phát nhạc và xóa hàng đợi tại 🔊 ${channelName}.`, track: null, queueLength: 0, channelName });
         }
 
         if (action === 'pause') {
