@@ -531,15 +531,21 @@ async function resolveAudioStreamForQuery(
  */
 async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | null> {
   const executable = process.env.YTDLP_PATH || 'yt-dlp';
-  // Keep the client set aligned with yt-dlp's current recommended PO-token flow.
-  // tv/web_safari are useful fallbacks, while bgutil provides the mweb PO token.
-  const client = process.env.YTDLP_PLAYER_CLIENT || 'mweb,tv,web_safari';
-  const cookiePath = '/tmp/youtube-cookies.txt';
 
-  // Render cannot use --cookies-from-browser because there is no browser profile.
-  // A Netscape-format cookies file can be supplied securely through a base64 env var.
+  // Keep the production resolver lightweight on Render's 512 MB instance.
+  // Only use YouTube clients that do not depend on the local bgutil PO-token server.
+  const configuredClients = (process.env.YTDLP_PLAYER_CLIENT || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value === 'tv' || value === 'web_safari');
+  const client = configuredClients.length ? configuredClients.join(',') : 'tv,web_safari';
+
+  const cookiePath = '/tmp/youtube-cookies.txt';
   const cookieBase64 = (process.env.YOUTUBE_COOKIES_BASE64 || '').trim();
+
   console.log('[YouTube Auth] Browser cookies configured:', Boolean(cookieBase64));
+  console.log('[YouTube Resolver] player_client:', client);
+
   if (cookieBase64) {
     try {
       fs.writeFileSync(cookiePath, Buffer.from(cookieBase64, 'base64'), { mode: 0o600 });
@@ -561,7 +567,7 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
         '--remote-components',
         'ejs:github',
         '--extractor-args',
-        `youtube:player_client=${client};youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416`,
+        `youtube:player_client=${client}`,
         '--format',
         'bestaudio/best',
         ...(cookieBase64 && fs.existsSync(cookiePath) ? ['--cookies', cookiePath] : []),
@@ -582,6 +588,11 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
     if (!streamUrl && stderr) {
       console.warn('[yt-dlp Audio Lookup Notice]:', stderr.slice(-2500));
     }
+
+    if (streamUrl) {
+      console.log('[YouTube Resolver] Audio stream resolved:', /\.m3u8(?:$|[?&])/i.test(streamUrl) ? 'HLS' : 'direct');
+    }
+
     return streamUrl || null;
   } catch (err: any) {
     const detail = [err?.message, err?.stderr].filter(Boolean).join(' | ');
@@ -668,12 +679,6 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
   }
 
   try {
-    const response = await fetch(track.streamUrl);
-    if (!response.ok || !response.body) throw new Error(`Stream HTTP ${response.status}`);
-
-    const nodeStream = Readable.fromWeb(response.body as any);
-    let inputStream: any = nodeStream;
-    let inputType = StreamType.Arbitrary;
     const filters: Record<string, string> = {
       BASS_BOOST: 'bass=g=8',
       VOCAL: 'highpass=f=120,equalizer=f=3000:t=q:w=1:g=4',
@@ -681,15 +686,76 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
       LOFI: 'lowpass=f=5000,bass=g=3',
       ACOUSTIC: 'highpass=f=60,equalizer=f=2000:t=q:w=1:g=2'
     };
+
     const filter = filters[session.filterPreset];
-    if (filter) {
-      const ffmpeg = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-af', filter, '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'], { stdio: ['pipe', 'pipe', 'ignore'] });
-      ffmpeg.stdin.on('error', () => {});
-      nodeStream.pipe(ffmpeg.stdin);
+    const isHls = /\.m3u8(?:$|[?&])/i.test(track.streamUrl);
+
+    let inputStream: any;
+    let inputType = StreamType.Arbitrary;
+
+    if (isHls) {
+      // HLS playlists cannot be pushed directly to @discordjs/voice.
+      // Let FFmpeg read the playlist and emit raw PCM without buffering the song in memory.
+      const ffmpegArgs = [
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
+        '-i', track.streamUrl,
+        '-vn'
+      ];
+
+      if (filter) ffmpegArgs.push('-af', filter);
+
+      ffmpegArgs.push(
+        '-f', 's16le',
+        '-ar', '48000',
+        '-ac', '2',
+        'pipe:1'
+      );
+
+      const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'ignore'] });
       session.audioProcess = ffmpeg;
       inputStream = ffmpeg.stdout;
       inputType = StreamType.Raw;
+    } else {
+      const response = await fetch(track.streamUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0'
+        }
+      });
+      if (!response.ok || !response.body) throw new Error(`Stream HTTP ${response.status}`);
+
+      const nodeStream = Readable.fromWeb(response.body as any);
+
+      if (filter) {
+        const ffmpeg = spawn(
+          'ffmpeg',
+          [
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-i', 'pipe:0',
+            '-vn',
+            '-af', filter,
+            '-f', 's16le',
+            '-ar', '48000',
+            '-ac', '2',
+            'pipe:1'
+          ],
+          { stdio: ['pipe', 'pipe', 'ignore'] }
+        );
+        ffmpeg.stdin.on('error', () => {});
+        nodeStream.pipe(ffmpeg.stdin);
+        session.audioProcess = ffmpeg;
+        inputStream = ffmpeg.stdout;
+        inputType = StreamType.Raw;
+      } else {
+        inputStream = nodeStream;
+      }
     }
+
     const resource = createAudioResource(inputStream, { inlineVolume: true, inputType });
     if (resource.volume) resource.volume.setVolume(session.volume / 100);
     session.currentResource = resource;
@@ -698,7 +764,10 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
     console.warn(`[Audio Stream Notice in ${session.channelName}]:`, err?.message);
     const nextTrack = session.queue.shift();
     if (nextTrack) await playTrackInSession(session, nextTrack);
-    else { session.currentTrack = null; session.currentResource = undefined; }
+    else {
+      session.currentTrack = null;
+      session.currentResource = undefined;
+    }
   }
 }
 
