@@ -2,10 +2,10 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-const DASHBOARD_CACHE_GUARD = 'qghn-dashboard-cache-guard-v2';
+const DASHBOARD_CACHE_GUARD = 'qghn-dashboard-cache-guard-v3';
 
-async function clearStaleDashboardRuntime() {
-  if (typeof window === 'undefined') return;
+async function clearStaleDashboardRuntime(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
 
   try {
     const registrations = 'serviceWorker' in navigator
@@ -19,9 +19,7 @@ async function clearStaleDashboardRuntime() {
       const cacheNames = await caches.keys();
       await Promise.all(
         cacheNames
-          .filter((name) =>
-            /^(aegisbot|workbox|vite-pwa|qghn)/i.test(name)
-          )
+          .filter((name) => /^(aegisbot|workbox|vite-pwa|qghn)/i.test(name))
           .map((name) => caches.delete(name))
       );
     }
@@ -30,13 +28,17 @@ async function clearStaleDashboardRuntime() {
     if (hadServiceWorker && !alreadyReloaded) {
       sessionStorage.setItem(DASHBOARD_CACHE_GUARD, '1');
       window.location.reload();
-      return;
+      return true;
     }
   } catch {
     // The app can still boot normally if browser cache APIs are unavailable.
   }
+
+  return false;
 }
 
-void clearStaleDashboardRuntime().finally(() => {
-  createRoot(document.getElementById('root')!).render(<App />);
+void clearStaleDashboardRuntime().then((reloading) => {
+  if (!reloading) {
+    createRoot(document.getElementById('root')!).render(<App />);
+  }
 });
