@@ -2536,6 +2536,22 @@ async function startServer() {
           });
         }
 
+        if (action === 'remove') {
+          const queueIndex = Number(req.body.queueIndex);
+          if (!Number.isInteger(queueIndex) || queueIndex < 0 || queueIndex >= existingSession.queue.length) {
+            return res.status(400).json({ ok: false, error: 'Vị trí bài hát trong hàng đợi không hợp lệ.' });
+          }
+          const [removed] = existingSession.queue.splice(queueIndex, 1);
+          return res.json({
+            ok: true,
+            message: `Đã xóa "${removed?.title || 'bài hát'}" khỏi hàng đợi.`,
+            removed,
+            queue: existingSession.queue,
+            queueLength: existingSession.queue.length,
+            channelName: existingSession.channelName
+          });
+        }
+
         const vol = typeof req.body.volume === 'number'
           ? Math.max(0, Math.min(100, req.body.volume))
           : 80;
