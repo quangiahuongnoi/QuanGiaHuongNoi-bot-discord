@@ -1500,6 +1500,7 @@ async function startDiscordBotIfConfigured() {
         if (startedAt) voiceHourlyMinutes[new Date(startedAt).getHours()] += Math.max(0, (Date.now() - startedAt) / 60000);
         voiceJoinTimes.set(key, Date.now());
       }
+      scheduleRuntimePersistence();
     });
 
     client.on('error', (err) => {
@@ -2027,6 +2028,7 @@ async function runSocialMonitor(reason = 'interval'): Promise<SocialMonitorCheck
   } finally {
     socialMonitorRunning = false;
     lastSocialMonitorResult = result;
+    scheduleRuntimePersistence();
   }
   if (reason === 'manual' && result.errors.length) {
     console.warn('[Social Monitor]', result.errors.join(' | '));
@@ -2212,6 +2214,10 @@ async function startServer() {
         intervalMs: socialMonitorIntervalMs(),
         running: socialMonitorRunning,
         lastResult: lastSocialMonitorResult
+      },
+      persistence: {
+        ...getPersistenceStatus(),
+        lastPersistedAt: lastPersistenceFlushAt || null
       },
       socialFeeds: liveSocialFeeds,
       config: {
@@ -2494,6 +2500,7 @@ async function startServer() {
   // 3c. Clear runtime audit logs
   app.delete('/api/bot/logs', (req, res) => {
     liveAuditLogs = [];
+    scheduleRuntimePersistence();
     res.json({ ok: true, message: 'Đã xóa nhật ký runtime.' });
   });
 
@@ -2682,6 +2689,7 @@ async function startServer() {
       console.warn('Could not write to .env:', e?.message);
     }
 
+    scheduleRuntimePersistence();
     await startDiscordBotIfConfigured();
 
     res.json({
