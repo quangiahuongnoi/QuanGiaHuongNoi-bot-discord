@@ -20,6 +20,11 @@ services:
       - key: DEFAULT_MEMBER_ROLE_ID
         sync: false
 
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+
       - key: ADMIN_USERNAME
         sync: false
       - key: ADMIN_PASSWORD
