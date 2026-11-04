@@ -2,19 +2,13 @@ FROM node:22-bookworm-slim
 
 WORKDIR /app
 
-# Cài đặt FFmpeg và thư viện giải mã âm thanh cho Discord Voice (@discordjs/voice)
+# FFmpeg is used both for Discord audio filters and for YouTube HLS streams.
+# Keep the image lightweight: no local bgutil PO-token server is needed anymore.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     python3 \
-    python3-pip \
     ca-certificates \
-    git \
-  && python3 -m pip install --no-cache-dir --break-system-packages -U "yt-dlp[default]" "bgutil-ytdlp-pot-provider==2.0.2" yt-dlp-ejs \
-  && git clone --depth 1 --branch 2.0.2 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-ytdlp-pot-provider \
-  && cd /opt/bgutil-ytdlp-pot-provider/server \
-  && npm ci \
-  && npx tsc \
-  && cd /app \
+  && python3 -m pip install --no-cache-dir --break-system-packages -U "yt-dlp[default]" yt-dlp-ejs \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
@@ -28,6 +22,4 @@ ENV PORT=10000
 
 EXPOSE 10000
 
-# Keep the bgutil PO-token provider running locally beside the bot.
-# yt-dlp connects to it through http://127.0.0.1:4416.
-CMD ["sh", "-c", "node /opt/bgutil-ytdlp-pot-provider/server/build/main.js --host 127.0.0.1 --port 4416 & exec npm start"]
+CMD ["npm", "start"]
