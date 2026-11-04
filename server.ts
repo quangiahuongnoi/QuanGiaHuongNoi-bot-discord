@@ -553,6 +553,18 @@ async function resolveAudioStreamForQuery(
 async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | null> {
   const executable = process.env.YTDLP_PATH || 'yt-dlp';
   const client = process.env.YTDLP_PLAYER_CLIENT || 'mweb,tv,web_safari,tv_embedded';
+  const cookiePath = '/tmp/youtube-cookies.txt';
+
+  // Render cannot use --cookies-from-browser because there is no browser profile.
+  // A Netscape-format cookies file can be supplied securely through a base64 env var.
+  const cookieBase64 = (process.env.YOUTUBE_COOKIES_BASE64 || '').trim();
+  if (cookieBase64) {
+    try {
+      fs.writeFileSync(cookiePath, Buffer.from(cookieBase64, 'base64'), { mode: 0o600 });
+    } catch (err: any) {
+      console.warn('[YouTube Cookies Notice]:', err?.message || 'Could not materialize cookies');
+    }
+  }
 
   try {
     const { stdout, stderr } = await execFileAsync(
@@ -570,6 +582,7 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
         `youtube:player_client=${client}`,\n        'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
         '--format',
         'bestaudio/best',
+        ...(cookieBase64 && fs.existsSync(cookiePath) ? ['--cookies', cookiePath] : []),
         videoUrl
       ],
       {
@@ -588,10 +601,15 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
       console.warn('[yt-dlp Audio Lookup Notice]:', stderr.slice(-2500));
     }
     return streamUrl || null;
+  } finally {
   } catch (err: any) {
     const detail = [err?.message, err?.stderr].filter(Boolean).join(' | ');
     console.warn('[yt-dlp Audio Lookup Notice]:', detail || 'Unable to resolve YouTube audio');
     return null;
+  } finally {
+    if (fs.existsSync(cookiePath)) {
+      try { fs.unlinkSync(cookiePath); } catch { /* ignore cleanup errors */ }
+    }
   }
 }
 
