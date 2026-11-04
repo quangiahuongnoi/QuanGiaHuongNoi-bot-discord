@@ -134,6 +134,8 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
         discordChannelId: ttChannelId || defaultChannelId,
         pingRoleId: ttPingRole || undefined,
         customMessage: ttTemplate,
+        notifyOnLive: true,
+        notifyOnUpload: true,
         lastLiveStatus: 'offline',
         lastVideoTitle: 'Chưa có dữ liệu mới',
         lastVideoUrl: `https://www.tiktok.com/${ttHandle.startsWith('@') ? ttHandle : `@${ttHandle}`}`, 
@@ -178,7 +180,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
         }
       })
       .catch(() => {
-        setTestNotificationSent(`Đã gửi thông báo thử nghiệm cho kênh "${name}"!`);
+        setTestNotificationSent(`⚠️ Không thể gửi thông báo thử nghiệm cho "${name}".`);
       });
 
     setTimeout(() => setTestNotificationSent(null), 4000);
