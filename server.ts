@@ -931,6 +931,137 @@ async function startDiscordBotIfConfigured() {
       if (parsedCmd.isCommand) {
         const cmdName = parsedCmd.commandName;
 
+        // Real prefix utility/social/moderation commands.
+        if (cmdName === 'ping') {
+          const latency = Date.now() - message.createdTimestamp;
+          await message.reply('🏓 Pong! Gateway: ' + client.ws.ping + 'ms · Response: ' + latency + 'ms');
+          return;
+        }
+
+        if (cmdName === 'serverinfo') {
+          const online = message.guild.members.cache.filter((m) => m.presence?.status && m.presence.status !== 'offline').size;
+          const emb = new EmbedBuilder().setColor(0x5865f2).setTitle('🏰 Thông Tin Máy Chủ: ' + message.guild.name)
+            .addFields(
+              { name: '👥 Thành viên', value: String(message.guild.memberCount), inline: true },
+              { name: '🟢 Online', value: String(online), inline: true },
+              { name: '💬 Kênh text', value: String(message.guild.channels.cache.filter((c) => c.type === ChannelType.GuildText).size), inline: true },
+              { name: '🔊 Kênh voice', value: String(message.guild.channels.cache.filter((c) => c.isVoiceBased()).size), inline: true },
+              { name: '🎭 Vai trò', value: String(message.guild.roles.cache.size), inline: true },
+              { name: '📡 Social', value: liveSocialFeeds.youtube.length + ' YouTube · ' + liveSocialFeeds.tiktok.length + ' TikTok', inline: true }
+            );
+          await message.reply({ embeds: [emb] });
+          return;
+        }
+
+        if (cmdName === 'userinfo') {
+          const target = message.mentions.members?.first() || (parsedCmd.args[0] ? await message.guild.members.fetch(parsedCmd.args[0]).catch(() => null) : null) || message.member;
+          if (!target) return;
+          const xp = userXPStore.get(message.guild.id + ':' + target.id);
+          const warnings = userWarningStore.get(message.guild.id + ':' + target.id) || 0;
+          const roles = target.roles.cache.filter((r) => r.id !== message.guild.id).map((r) => '<@&' + r.id + '>').slice(0, 15).join(' ') || 'Không có role';
+          const emb = new EmbedBuilder().setColor(0x8b5cf6).setTitle('👤 Hồ Sơ: ' + target.displayName).setThumbnail(target.user.displayAvatarURL({ size: 1024 }))
+            .addFields(
+              { name: 'Username', value: '@' + target.user.username, inline: true },
+              { name: 'Bot', value: target.user.bot ? 'Có' : 'Không', inline: true },
+              { name: 'Tham gia', value: target.joinedAt?.toLocaleDateString('vi-VN') || '—', inline: true },
+              { name: 'XP / Level', value: String(xp?.xp || 0) + ' XP · Level ' + String(xp?.level || 0), inline: true },
+              { name: 'Cảnh cáo', value: String(warnings), inline: true },
+              { name: 'Roles', value: roles }
+            );
+          await message.reply({ embeds: [emb] });
+          return;
+        }
+
+        if (cmdName === 'avatar') {
+          const target = message.mentions.users.first() || message.author;
+          await message.reply('🖼️ Avatar HD của **' + target.tag + '**:\n' + target.displayAvatarURL({ size: 4096, extension: 'png' }));
+          return;
+        }
+
+        if (cmdName === 'warn') {
+          if (!message.member?.permissions.has(PermissionFlagsBits.ModerateMembers) && !message.member?.permissions.has(PermissionFlagsBits.Administrator)) {
+            await message.reply('❌ Bạn cần quyền **Moderate Members** để cảnh cáo thành viên.');
+            return;
+          }
+          const target = message.mentions.members?.first() || (parsedCmd.args[0] ? await message.guild.members.fetch(parsedCmd.args[0]).catch(() => null) : null);
+          if (!target) { await message.reply('⚠️ Dùng: !warn @user [lý do]'); return; }
+          const reason = parsedCmd.args.slice(message.mentions.members?.first() ? 1 : 1).join(' ') || 'Vi phạm nội quy máy chủ';
+          const key = message.guild.id + ':' + target.id;
+          const warnings = (userWarningStore.get(key) || 0) + 1;
+          userWarningStore.set(key, warnings);
+          appendLog({ actionType: 'MEMBER_WARN', executor: { name: authorDisplay, isBot: false }, target: { name: target.user.tag, id: target.id }, details: 'Cảnh cáo lần ' + warnings + ': ' + reason, severity: 'warning', channelName: '#' + channelName });
+          await message.reply('⚠️ Đã cảnh cáo **' + target.displayName + '**. Tổng cảnh cáo: **' + warnings + '**.\nLý do: ' + reason);
+          return;
+        }
+
+        if (cmdName === 'social') {
+          const yt = liveSocialFeeds.youtube.map((f) => '• YouTube: **' + f.channelName + '** — ' + f.channelUrl).join('\n') || 'Không có feed';
+          const tt = liveSocialFeeds.tiktok.map((f) => '• TikTok: **' + f.creatorName + '** — https://www.tiktok.com/' + normalizeTikTokHandle(f.creatorHandle)).join('\n') || 'Không có feed';
+          await message.reply({ embeds: [new EmbedBuilder().setColor(0xf43f5e).setTitle('🌐 Social Monitor').setDescription(yt + '\n' + tt)] });
+          return;
+        }
+
+        if (cmdName === 'youtube') {
+          const query = parsedCmd.rawArgs.toLowerCase();
+          const feed = liveSocialFeeds.youtube.find((f) => !query || f.channelName.toLowerCase().includes(query) || f.channelUrl.toLowerCase().includes(query)) || liveSocialFeeds.youtube[0];
+          if (!feed) { await message.reply('⚠️ Chưa cấu hình feed YouTube.'); return; }
+          const results = await Promise.allSettled([getLatestYouTubeUpload(feed), getYouTubeLive(feed)]);
+          const latest = results[0].status === 'fulfilled' && results[0].value ? results[0].value : null;
+          const live = results[1].status === 'fulfilled' ? results[1].value : { live: false };
+          const liveText = live.live ? '🔴 ĐANG LIVE\n' + (live.title || 'Livestream') + '\n' + (live.url || feed.channelUrl + '/live') : '⚪ Hiện không LIVE.';
+          const latestText = latest ? 'Video mới: **' + latest.title + '**\n' + latest.url : 'Không đọc được video mới nhất.';
+          await message.reply({ embeds: [new EmbedBuilder().setColor(0xff0033).setTitle('▶️ YouTube — ' + feed.channelName).setDescription(liveText + '\n\n' + latestText)] });
+          return;
+        }
+
+        if (cmdName === 'tiktok') {
+          const query = parsedCmd.rawArgs.toLowerCase();
+          const feed = liveSocialFeeds.tiktok.find((f) => !query || f.creatorHandle.toLowerCase().includes(query) || f.creatorName.toLowerCase().includes(query)) || liveSocialFeeds.tiktok[0];
+          if (!feed) { await message.reply('⚠️ Chưa cấu hình feed TikTok.'); return; }
+          const results = await Promise.allSettled([getLatestTikTokUpload(feed), getTikTokLive(feed)]);
+          const latest = results[0].status === 'fulfilled' && results[0].value ? results[0].value : null;
+          const live = results[1].status === 'fulfilled' ? results[1].value : { live: false };
+          const liveText = live.live ? '🔴 ĐANG LIVE\n' + (live.title || 'Livestream') + '\n' + (live.url || 'https://www.tiktok.com/' + normalizeTikTokHandle(feed.creatorHandle) + '/live') : '⚪ Hiện không LIVE.';
+          const latestText = latest ? 'Clip mới: **' + latest.title + '**\n' + latest.url : 'Không đọc được clip mới nhất.';
+          await message.reply({ embeds: [new EmbedBuilder().setColor(0x00f2fe).setTitle('🎵 TikTok — ' + feed.creatorName).setDescription(liveText + '\n\n' + latestText)] });
+          return;
+        }
+
+        if (cmdName === 'role') {
+          if (!message.member?.permissions.has(PermissionFlagsBits.ManageRoles) && !message.member?.permissions.has(PermissionFlagsBits.Administrator)) {
+            await message.reply('❌ Bạn cần quyền **Manage Roles**.');
+            return;
+          }
+          const target = message.mentions.members?.first() || (parsedCmd.args[0] ? await message.guild.members.fetch(parsedCmd.args[0]).catch(() => null) : null);
+          const roleMention = parsedCmd.args.find((a) => /^<@&\d+>$/.test(a));
+          const roleId = roleMention?.match(/\d+/)?.[0] || parsedCmd.args[1];
+          const role = roleId ? message.guild.roles.cache.get(roleId) : null;
+          if (!target || !role) { await message.reply('⚠️ Dùng: !role @user @role'); return; }
+          if (!role.editable || !target.manageable) { await message.reply('❌ Bot không thể chỉnh role này.'); return; }
+          if (target.roles.cache.has(role.id)) { await target.roles.remove(role.id); await message.reply('➖ Đã gỡ role **' + role.name + '** khỏi **' + target.displayName + '**.'); }
+          else { await target.roles.add(role.id); await message.reply('➕ Đã cấp role **' + role.name + '** cho **' + target.displayName + '**.'); }
+          return;
+        }
+
+        if (cmdName === 'loop' || cmdName === 'filter') {
+          const session = guildVoiceSessions.get(message.guild.id);
+          if (!session) { await message.reply('⚠️ Bot chưa có phiên Voice hoạt động.'); return; }
+          if (cmdName === 'loop') {
+            const mode = String(parsedCmd.args[0] || 'TRACK').toUpperCase();
+            if (!['OFF', 'TRACK', 'QUEUE'].includes(mode)) { await message.reply('Dùng: !loop off | !loop track | !loop queue'); return; }
+            session.loopMode = mode as 'OFF' | 'TRACK' | 'QUEUE';
+            await message.reply('🔁 Loop mode: **' + session.loopMode + '**');
+            return;
+          }
+          const presetMap: Record<string, string> = { flat: 'FLAT', bassboost: 'BASS_BOOST', bass_boost: 'BASS_BOOST', vocal: 'VOCAL', nightcore: 'NIGHTCORE', lofi: 'LOFI', acoustic: 'ACOUSTIC' };
+          const preset = presetMap[String(parsedCmd.args[0] || 'flat').toLowerCase()];
+          if (!preset) { await message.reply('Dùng: !filter flat | bassboost | vocal | nightcore | lofi | acoustic'); return; }
+          session.filterPreset = preset as any;
+          if (session.currentTrack) await playTrackInSession(session, session.currentTrack);
+          await message.reply('🎚️ Equalizer: **' + session.filterPreset + '**');
+          return;
+        }
+
         // REAL VOICE & MUSIC COMMANDS (!play, !join, !leave, !pause, !skip, !stop, !queue, !247, !volume)
         if (
           ['play', 'join', 'leave', 'disconnect', 'dc', 'pause', 'skip', 'stop', 'queue', '247', 'volume'].includes(
