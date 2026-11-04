@@ -54,7 +54,7 @@ export default defineConfig(() => {
               urlPattern: ({ request }) => request.destination === 'document',
               handler: 'NetworkFirst',
               options: {
-                cacheName: 'aegisbot-html-v3',
+                cacheName: 'aegisbot-html-v4',
                 networkTimeoutSeconds: 5,
                 cacheableResponse: {
                   statuses: [200]
