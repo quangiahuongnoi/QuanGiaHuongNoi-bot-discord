@@ -59,7 +59,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
   onRemoveTrack,
   guild
 }) => {
-  const [currentTime, setCurrentTime] = useState(25);
+  const [currentTime, setCurrentTime] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'queue' | 'lyrics' | 'equalizer'>('queue');
   const [showAddSuccess, setShowAddSuccess] = useState(false);
@@ -79,15 +79,15 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data.status === 'connected' && data.guilds?.length > 0) {
-          const firstGuild = data.guilds[0];
-          if (Array.isArray(firstGuild.voiceChannels)) {
-            setLiveVoiceChannels(firstGuild.voiceChannels);
-            if (!selectedVoiceChannelId && firstGuild.voiceChannels.length > 0) {
-              setSelectedVoiceChannelId(firstGuild.voiceChannels[0].id);
+          const currentGuild = data.guilds.find((g: any) => g.id === guild.id) || data.guilds[0];
+          if (Array.isArray(currentGuild.voiceChannels)) {
+            setLiveVoiceChannels(currentGuild.voiceChannels);
+            if (!selectedVoiceChannelId && currentGuild.voiceChannels.length > 0) {
+              setSelectedVoiceChannelId(currentGuild.activeVoice?.channelId || currentGuild.voiceChannels[0].id);
             }
           }
-          if (firstGuild.activeVoice?.channelName) {
-            setActiveLiveVoiceName(firstGuild.activeVoice.channelName);
+          if (currentGuild.activeVoice?.channelName) {
+            setActiveLiveVoiceName(currentGuild.activeVoice.channelName);
           } else {
             setActiveLiveVoiceName(null);
           }
@@ -208,7 +208,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
               </span>
             </div>
             <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-2 mt-0.5">
-              <span>Bitrate: <strong>384kbps (Studio)</strong></span>
+              <span>Audio: <strong>nguồn trực tiếp Discord Voice</strong></span>
               <span>·</span>
               <span>Engine: <strong>@discordjs/voice + FFmpeg Opus</strong></span>
               <span>·</span>
@@ -441,13 +441,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
                   max="100"
                   value={volume}
                   onChange={(e) => {
-                    const newVol = Number(e.target.value);
-                    onSetVolume(newVol);
-                    fetch('/api/bot/voice-control', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'volume', volume: newVol })
-                    }).catch(() => {});
+                    onSetVolume(Number(e.target.value));
                   }}
                   className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                   aria-label="Thanh chỉnh âm lượng"
