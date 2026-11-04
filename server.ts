@@ -533,12 +533,13 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
   const executable = process.env.YTDLP_PATH || 'yt-dlp';
 
   // Keep the production resolver lightweight on Render's 512 MB instance.
-  // Only use YouTube clients that do not depend on the local bgutil PO-token server.
+  // Prefer yt-dlp's current authenticated default clients and explicitly add
+  // web_safari so YouTube can expose HLS formats when direct formats are absent.
   const configuredClients = (process.env.YTDLP_PLAYER_CLIENT || '')
     .split(',')
     .map((value) => value.trim())
-    .filter((value) => value === 'tv' || value === 'web_safari');
-  const client = configuredClients.length ? configuredClients.join(',') : 'tv,web_safari';
+    .filter(Boolean);
+  const client = configuredClients.length ? configuredClients.join(',') : 'default,web_safari';
 
   const cookiePath = '/tmp/youtube-cookies.txt';
   const cookieBase64 = (process.env.YOUTUBE_COOKIES_BASE64 || '').trim();
