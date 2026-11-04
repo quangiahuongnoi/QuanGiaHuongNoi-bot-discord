@@ -68,6 +68,13 @@ import {
   INITIAL_REACTION_ROLES
 } from './src/bot/initialData';
 import { AuditLogEntry, YouTubeFeed, TikTokFeed, ReactionRoleGroup } from './src/bot/types';
+import {
+  closePersistence,
+  getPersistenceStatus,
+  initPersistence,
+  loadPersistedRuntimeState,
+  savePersistedRuntimeState
+} from './src/bot/persistence';
 
 dotenv.config();
 
@@ -167,6 +174,127 @@ function appendLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) {
     case 'MEMBER_BAN': moderationStats.bans += 1; break;
     default: break;
   }
+  scheduleRuntimePersistence();
+}
+
+let persistenceFlushTimer: NodeJS.Timeout | null = null;
+let persistenceInterval: NodeJS.Timeout | null = null;
+let lastPersistenceFlushAt = '';
+
+function buildPersistedRuntimeState() {
+  return {
+    schemaVersion: 1,
+    config: liveConfig,
+    socialFeeds: liveSocialFeeds,
+    auditLogs: liveAuditLogs.slice(0, 100),
+    warnings: Array.from(userWarningStore.entries()),
+    userXP: Array.from(userXPStore.values()),
+    analytics: {
+      messageHourlyCounts: messageHourlyCounts.slice(0, 24),
+      voiceHourlyMinutes: voiceHourlyMinutes.slice(0, 24),
+      channelMessageCounts: Array.from(channelMessageCounts.entries()),
+      memberJoinEvents: memberJoinEvents.slice(-5000),
+      moderationStats: { ...moderationStats }
+    }
+  };
+}
+
+function scheduleRuntimePersistence() {
+  if (!getPersistenceStatus().connected || persistenceFlushTimer) return;
+  persistenceFlushTimer = setTimeout(() => {
+    persistenceFlushTimer = null;
+    void flushRuntimePersistence();
+  }, 1500);
+}
+
+async function flushRuntimePersistence() {
+  if (!getPersistenceStatus().connected) return false;
+  const ok = await savePersistedRuntimeState(buildPersistedRuntimeState());
+  if (ok) lastPersistenceFlushAt = new Date().toISOString();
+  return ok;
+}
+
+async function hydrateRuntimeFromPersistence() {
+  const state = await loadPersistedRuntimeState();
+  if (!state) return false;
+
+  if (state.config && typeof state.config === 'object') {
+    const savedConfig = state.config as any;
+    liveConfig = {
+      ...liveConfig,
+      ...savedConfig,
+      modulesEnabled: {
+        ...liveConfig.modulesEnabled,
+        ...(savedConfig.modulesEnabled || {})
+      }
+    };
+  }
+
+  if (state.socialFeeds && typeof state.socialFeeds === 'object') {
+    const savedFeeds = state.socialFeeds as any;
+    liveSocialFeeds = {
+      youtube: Array.isArray(savedFeeds.youtube) ? savedFeeds.youtube : liveSocialFeeds.youtube,
+      tiktok: Array.isArray(savedFeeds.tiktok) ? savedFeeds.tiktok : liveSocialFeeds.tiktok
+    };
+  }
+
+  if (Array.isArray(state.auditLogs)) {
+    liveAuditLogs = state.auditLogs.slice(0, 100) as AuditLogEntry[];
+  }
+
+  userWarningStore.clear();
+  if (Array.isArray(state.warnings)) {
+    for (const item of state.warnings) {
+      if (Array.isArray(item) && typeof item[0] === 'string' && Number.isFinite(Number(item[1]))) {
+        userWarningStore.set(item[0], Number(item[1]));
+      }
+    }
+  }
+
+  userXPStore.clear();
+  if (Array.isArray(state.userXP)) {
+    for (const item of state.userXP) {
+      if (item && typeof item === 'object' && typeof (item as any).userId === 'string') {
+        const data = item as UserXPData;
+        userXPStore.set(`${data.guildId}:${data.userId}`, data);
+      }
+    }
+  }
+
+  const analytics = state.analytics;
+  if (analytics) {
+    if (Array.isArray(analytics.messageHourlyCounts)) {
+      messageHourlyCounts.splice(0, messageHourlyCounts.length, ...analytics.messageHourlyCounts.slice(0, 24).map(Number));
+      while (messageHourlyCounts.length < 24) messageHourlyCounts.push(0);
+    }
+    if (Array.isArray(analytics.voiceHourlyMinutes)) {
+      voiceHourlyMinutes.splice(0, voiceHourlyMinutes.length, ...analytics.voiceHourlyMinutes.slice(0, 24).map(Number));
+      while (voiceHourlyMinutes.length < 24) voiceHourlyMinutes.push(0);
+    }
+    channelMessageCounts.clear();
+    if (Array.isArray(analytics.channelMessageCounts)) {
+      for (const item of analytics.channelMessageCounts) {
+        if (Array.isArray(item) && typeof item[0] === 'string') {
+          channelMessageCounts.set(item[0], Number(item[1]) || 0);
+        }
+      }
+    }
+    memberJoinEvents.splice(
+      0,
+      memberJoinEvents.length,
+      ...(Array.isArray(analytics.memberJoinEvents) ? analytics.memberJoinEvents.slice(-5000).map(Number) : [])
+    );
+    if (analytics.moderationStats && typeof analytics.moderationStats === 'object') {
+      const savedModeration = analytics.moderationStats as any;
+      moderationStats.warns = Number(savedModeration.warns) || 0;
+      moderationStats.timeouts = Number(savedModeration.timeouts) || 0;
+      moderationStats.kicks = Number(savedModeration.kicks) || 0;
+      moderationStats.bans = Number(savedModeration.bans) || 0;
+    }
+  }
+
+  console.log('✅ Runtime state restored from PostgreSQL.');
+  return true;
 }
 
 /**
@@ -740,6 +868,7 @@ async function startDiscordBotIfConfigured() {
     client.on('guildMemberAdd', async (member) => {
       memberJoinEvents.push(Date.now());
       while (memberJoinEvents.length > 5000) memberJoinEvents.shift();
+      scheduleRuntimePersistence();
       if (!liveConfig.modulesEnabled.autoRole || !liveConfig.joinRoleEnabled) return;
       try {
         if (liveConfig.defaultMemberRoleId && !member.user.bot) {
@@ -1354,6 +1483,7 @@ async function startDiscordBotIfConfigured() {
         }
       }
       userXPStore.set(xpKey, userXP);
+      scheduleRuntimePersistence();
     });
 
     client.on('voiceStateUpdate', (oldState, newState) => {
@@ -1987,6 +2117,10 @@ async function startServer() {
       botGatewayStatus: botConnectionStatus,
       activeVoiceSessions: guildVoiceSessions.size,
       activeCommandsCount: liveConfig.commands.filter((c) => c.enabled).length,
+      persistence: {
+        ...getPersistenceStatus(),
+        lastPersistedAt: lastPersistenceFlushAt || null
+      },
       timestamp: new Date().toISOString()
     });
   });
@@ -2293,6 +2427,7 @@ async function startServer() {
     if (Array.isArray(youtubeFeeds)) liveSocialFeeds.youtube = youtubeFeeds;
     if (Array.isArray(tiktokFeeds)) liveSocialFeeds.tiktok = tiktokFeeds;
 
+    scheduleRuntimePersistence();
     res.json({
       ok: true,
       message: 'Đã đồng bộ cấu hình, hệ thống lệnh và phân hệ trực tiếp xuống nhân xử lý Bot.'
@@ -2984,6 +3119,16 @@ async function startServer() {
   // Serve static public assets
   app.use('/public', express.static(path.join(__dirname, 'public')));
 
+  // Initialize persistent runtime storage before starting the bot so Web Admin
+  // state is restored before the first status poll.
+  await initPersistence();
+  await hydrateRuntimeFromPersistence();
+
+  if (persistenceInterval) clearInterval(persistenceInterval);
+  persistenceInterval = setInterval(() => {
+    void flushRuntimePersistence();
+  }, 30_000);
+
   // Start Discord Bot if token is configured in environment
   startDiscordBotIfConfigured();
   // Start the real YouTube/TikTok notification monitor after the API is ready.
@@ -3018,6 +3163,18 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 AegisBot Full-Stack Server running on http://localhost:${PORT}`);
   });
+
+  const gracefulShutdown = async () => {
+    try {
+      await flushRuntimePersistence();
+    } finally {
+      if (persistenceInterval) clearInterval(persistenceInterval);
+      await closePersistence();
+      process.exit(0);
+    }
+  };
+  process.once('SIGTERM', gracefulShutdown);
+  process.once('SIGINT', gracefulShutdown);
 }
 
 startServer();
