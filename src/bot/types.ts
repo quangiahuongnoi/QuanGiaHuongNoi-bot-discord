@@ -70,6 +70,8 @@ export interface TikTokFeed {
   discordChannelId: string;
   pingRoleId?: string;
   customMessage: string;
+  notifyOnLive: boolean;
+  notifyOnUpload: boolean;
   lastLiveStatus: 'offline' | 'live';
   lastVideoTitle: string;
   lastVideoUrl: string;
