@@ -1631,6 +1631,16 @@ function socialMonitorIntervalMs() {
   return Math.max(30000, Math.min(parsed, 15 * 60 * 1000));
 }
 
+function socialMonitorStartupGraceMs() {
+  const parsed = Number(process.env.SOCIAL_MONITOR_STARTUP_GRACE_MS || 120000);
+  if (!Number.isFinite(parsed)) return 120000;
+  return Math.max(60000, Math.min(parsed, 10 * 60 * 1000));
+}
+
+function socialMonitorStartupGraceActive() {
+  return Date.now() - SERVER_START_TIME < socialMonitorStartupGraceMs();
+}
+
 function decodeHtmlEntities(value: string) {
   return value
     .replace(/&amp;/g, '&')
@@ -1934,13 +1944,16 @@ async function checkYouTubeFeed(feed: YouTubeFeed, result: SocialMonitorCheckRes
     const previous = feed.lastLiveStatus || 'offline';
     const isPrimed = socialMonitorPrimed.has(`yt:${feed.id}`);
     if (live && previous !== 'live') {
-      if (isPrimed && feed.notifyOnLive) {
+      const startupGraceActive = socialMonitorStartupGraceActive();
+      if (isPrimed && !startupGraceActive && feed.notifyOnLive) {
         await sendSocialAlert('youtube', feed, {
           type: 'live',
           title: ('title' in liveState.value && liveState.value.title) ? liveState.value.title : `Livestream của ${feed.channelName}`,
           url: ('url' in liveState.value && liveState.value.url) ? liveState.value.url : `${normalizeYouTubeUrl(feed.channelUrl, feed.channelName)}/live`
         });
         result.alertsSent += 1;
+      } else if (isPrimed && startupGraceActive && feed.notifyOnLive) {
+        console.log(`[Social Monitor] Suppressed YouTube startup LIVE transition for ${feed.channelName}.`);
       }
     }
     feed.lastLiveStatus = live ? 'live' : 'offline';
@@ -1977,12 +1990,16 @@ async function checkTikTokFeed(feed: TikTokFeed, result: SocialMonitorCheckResul
       const previous = feed.lastLiveStatus || 'offline';
       const live = liveState.value.live;
       if (live && previous !== 'live' && isPrimed && feed.notifyOnLive) {
-        await sendSocialAlert('tiktok', feed, {
-          type: 'live',
-          title: ('title' in liveState.value && liveState.value.title) ? liveState.value.title : `${feed.creatorName} đang LIVE`,
-          url: ('url' in liveState.value && liveState.value.url) ? liveState.value.url : `https://www.tiktok.com/${normalizeTikTokHandle(feed.creatorHandle)}/live`
-        });
-        result.alertsSent += 1;
+        if (!socialMonitorStartupGraceActive()) {
+          await sendSocialAlert('tiktok', feed, {
+            type: 'live',
+            title: ('title' in liveState.value && liveState.value.title) ? liveState.value.title : `${feed.creatorName} đang LIVE`,
+            url: ('url' in liveState.value && liveState.value.url) ? liveState.value.url : `https://www.tiktok.com/${normalizeTikTokHandle(feed.creatorHandle)}/live`
+          });
+          result.alertsSent += 1;
+        } else {
+          console.log(`[Social Monitor] Suppressed TikTok startup LIVE transition for ${feed.creatorName}.`);
+        }
       }
       feed.lastLiveStatus = live ? 'live' : 'offline';
     }
