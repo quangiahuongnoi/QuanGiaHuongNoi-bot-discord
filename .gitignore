@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+dev-dist/
+coverage/
+.aistudio/
+.playwright/
+.DS_Store
+*.log
+.env*
+!.env.example

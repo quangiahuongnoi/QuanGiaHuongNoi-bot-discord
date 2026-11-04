@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AegisBot - Bảng Điều Khiển Web Trực Tiếp 24/7</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #020617;
+      color: #f8fafc;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+
+  <!-- TOP APP BAR -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50 px-4 sm:px-6 py-3.5 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <div class="relative">
+        <div id="botAvatarContainer" class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/30 overflow-hidden font-bold">
+          <i data-lucide="bot" class="w-6 h-6"></i>
+        </div>
+        <span id="botStatusDot" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-900 bg-amber-500" title="Chờ kết nối"></span>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span id="botTagName" class="font-bold text-sm tracking-tight text-white">AegisBot Studio</span>
+          <span id="botStatusBadge" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
+            Offline
+          </span>
+        </div>
+        <div class="text-[11px] text-slate-400 flex items-center gap-2">
+          <span id="botLatency">Đang kiểm tra kết nối...</span>
+          <span>•</span>
+          <span id="botGuildsCount">0 Server</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions Top Bar -->
+    <div class="flex items-center gap-2.5">
+      <div class="hidden md:flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs font-mono text-slate-400">
+        <span>API:</span>
+        <input id="apiBaseUrl" type="text" value="" placeholder="http://localhost:3000" class="bg-transparent text-slate-200 outline-none w-36 text-xs" />
+      </div>
+      <button onclick="refreshData()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors" title="Làm mới trạng thái">
+        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+      </button>
+      <a id="inviteBotLink" href="https://discord.com/developers/applications" target="_blank" class="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all">
+        <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+        <span>Mời Bot Vào Server</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- ALERT NOTIFICATION BANNER -->
+  <div id="alertBanner" class="hidden px-6 py-2.5 text-xs flex items-center justify-between border-b transition-all">
+    <div class="flex items-center gap-2">
+      <i id="alertIcon" data-lucide="info" class="w-4 h-4 shrink-0"></i>
+      <span id="alertMessage">Thông báo</span>
+    </div>
+    <button onclick="hideAlert()" class="text-slate-400 hover:text-white">✕</button>
+  </div>
+
+  <!-- MAIN CONTAINER -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+
+    <!-- SECTION 1: CREDENTIALS & TOKEN SETUP (COLLAPSIBLE / ACCORDION) -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
+            <i data-lucide="key" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h2 class="text-sm font-bold text-white flex items-center gap-2">
+              <span>Cấu Hình Token Discord Bot & Khởi Động 24/7</span>
+              <span class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300">1-Click</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">Nhập Token bot từ Discord Developer Portal để bot online và nhận lệnh tức thì</p>
+          </div>
+        </div>
+
+        <button onclick="toggleTokenConfig()" class="text-xs text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1">
+          <span id="tokenToggleText">Mở rộng cấu hình</span>
+          <i data-lucide="chevron-down" id="tokenToggleIcon" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+
+      <div id="tokenConfigBody" class="space-y-4 pt-3 border-t border-slate-800/80">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">DISCORD_BOT_TOKEN</label>
+            <input id="inputBotToken" type="password" placeholder="Nhập Discord Bot Token (Bot -> Reset Token)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5">DISCORD_CLIENT_ID (Application ID)</label>
+            <input id="inputClientId" type="text" placeholder="Nhập Client ID (General Information)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+          <span class="text-xs text-slate-400 flex items-center gap-1.5">
+            <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+            <span>Đừng quên bật 3 quyền <strong>Privileged Gateway Intents</strong> trên Discord Developer Portal.</span>
+          </span>
+
+          <button onclick="submitSaveToken()" id="btnSaveToken" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/30">
+            <i data-lucide="save" class="w-4 h-4"></i>
+            <span>Lưu Token & Đăng Nhập Bot Ngay</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SERVER & CHANNEL SELECTOR BAR -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div class="flex flex-wrap items-center gap-4 w-full md:w-auto">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Máy Chủ:</span>
+          <select id="selectGuild" onchange="onGuildChange()" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-indigo-500">
+            <option value="">Đang tải danh sách server...</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Kênh Chat:</span>
+          <select id="selectTextChannel" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-indigo-500">
+            <option value="">-- Chọn kênh chat --</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Kênh Voice:</span>
+          <select id="selectVoiceChannel" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-indigo-500">
+            <option value="">-- Chọn kênh voice --</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="activeVoiceRoomBadge" class="hidden items-center gap-2 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold shrink-0">
+        <i data-lucide="radio" class="w-3.5 h-3.5 animate-pulse"></i>
+        <span id="activeVoiceRoomText">Đang ở phòng Voice</span>
+      </div>
+    </div>
+
+    <!-- 2-COLUMN MAIN INTERACTION GRID -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+      <!-- LEFT: VOICE / MUSIC STUDIO (7 COLS) -->
+      <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
+              <i data-lucide="music" class="w-4 h-4"></i>
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-white">Điều Khiển Phát Nhạc Voice 24/7</h3>
+              <p class="text-xs text-slate-400">Tự động kết nối và stream âm thanh chuẩn Hi-Fi vào kênh thoại Discord</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+            Hi-Fi 384kbps
+          </span>
+        </div>
+
+        <!-- Song Search Input & Play Button -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-slate-300">Tên Bài Hát Hoặc Link YouTube</label>
+          <div class="flex flex-col sm:flex-row gap-2">
+            <input id="inputSongQuery" type="text" placeholder="Ví dụ: Chìm Sâu RPT MCK, Nơi Này Có Anh, Lo-Fi Chill..." class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+            <button onclick="controlVoice('play')" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap shadow-md shadow-emerald-600/20">
+              <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+              <span>Vào Phòng & Phát</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Voice Action Buttons -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+          <button onclick="controlVoice('pause')" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors">
+            <i data-lucide="pause" class="w-3.5 h-3.5"></i>
+            <span>Tạm Dừng / Tiếp</span>
+          </button>
+          <button onclick="controlVoice('skip')" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors">
+            <i data-lucide="skip-forward" class="w-3.5 h-3.5"></i>
+            <span>Bỏ Qua (Skip)</span>
+          </button>
+          <button onclick="controlVoice('join')" class="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors">
+            <i data-lucide="phone-call" class="w-3.5 h-3.5"></i>
+            <span>Nhảy Vào Phòng</span>
+          </button>
+          <button onclick="controlVoice('leave')" class="p-2.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors">
+            <i data-lucide="phone-off" class="w-3.5 h-3.5"></i>
+            <span>Rời Phòng (Leave)</span>
+          </button>
+        </div>
+
+        <!-- Volume Control Slider -->
+        <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+          <div class="flex items-center justify-between text-xs text-slate-300">
+            <span class="flex items-center gap-1.5">
+              <i data-lucide="volume-2" class="w-4 h-4 text-indigo-400"></i>
+              <span>Âm lượng phát nhạc bot:</span>
+            </span>
+            <span id="volumeText" class="font-mono font-bold text-indigo-400">85%</span>
+          </div>
+          <input id="volumeSlider" oninput="onVolumeChange(this.value)" type="range" min="0" max="100" value="85" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+        </div>
+
+        <!-- Now Playing Card -->
+        <div id="nowPlayingCard" class="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+          <div class="flex items-center justify-between text-xs text-slate-400">
+            <span class="uppercase tracking-wider font-bold text-[10px] text-emerald-400">Đang Phát Trong Voice</span>
+            <span id="queueLengthText" class="font-mono text-[11px]">Hàng đợi: 0 bài</span>
+          </div>
+          <div id="currentTrackTitle" class="text-sm font-bold text-white truncate">
+            Chưa có bài hát nào đang phát
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: SEND MESSAGE & ANNOUNCEMENT DISPATCHER (5 COLS) -->
+      <div class="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+        <div class="flex items-center gap-2.5 pb-3 border-b border-slate-800">
+          <div class="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+            <i data-lucide="send" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white">Gửi Thông Báo Lên Kênh Chat</h3>
+            <p class="text-xs text-slate-400">Gửi tin nhắn hoặc Rich Embed từ bot trực tiếp vào kênh đã chọn</p>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Nội dung tin nhắn văn bản</label>
+            <textarea id="inputMsgContent" rows="2" placeholder="Nhập tin nhắn..." class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+          </div>
+
+          <div class="space-y-2 pt-2 border-t border-slate-800/60">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-indigo-400">Discord Rich Embed (Tùy chọn)</div>
+            <input id="inputEmbedTitle" type="text" placeholder="Tiêu đề Embed (Ví dụ: 📢 Thông Báo Sự Kiện)" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+            <textarea id="inputEmbedDesc" rows="3" placeholder="Mô tả nội dung chi tiết trong hộp Embed..." class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+          </div>
+
+          <button onclick="submitSendMessage()" class="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-md shadow-indigo-600/30">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i>
+            <span>Gửi Ngay Vào Kênh Discord</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION 3: QUICK MODERATION & AUTO-ROLE TOOLS -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+      <!-- TOOL 1: FAST MESSAGE CLEANER (!clear) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-white uppercase tracking-wider">Dọn Dẹp Tin Nhắn (!clear)</h4>
+            <p class="text-[11px] text-slate-400">Xóa nhanh tin nhắn trong kênh đang chọn</p>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <input id="inputClearCount" type="number" min="1" max="100" value="10" class="w-24 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono text-center" />
+          <button onclick="submitClearMessages()" class="flex-1 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors">
+            <i data-lucide="trash" class="w-3.5 h-3.5"></i>
+            <span>Xóa Tin Nhắn</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- TOOL 2: MEMBER MODERATION (KICK / BAN / TIMEOUT) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center">
+            <i data-lucide="user-x" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-white uppercase tracking-wider">Xử Lý Thành Viên</h4>
+            <p class="text-[11px] text-slate-400">Kick, Ban hoặc Timeout theo User ID</p>
+          </div>
+        </div>
+
+        <input id="inputModMemberId" type="text" placeholder="Nhập Discord User ID thành viên..." class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-white placeholder-slate-500" />
+        <div class="flex gap-2">
+          <button onclick="submitModMember('TIMEOUT')" class="flex-1 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-xs font-medium">Timeout 1h</button>
+          <button onclick="submitModMember('KICK')" class="flex-1 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-medium">Kick</button>
+          <button onclick="submitModMember('BAN')" class="flex-1 py-1.5 rounded-lg bg-rose-700/40 hover:bg-rose-700/60 text-rose-200 border border-rose-500/40 text-xs font-medium">Ban</button>
+        </div>
+      </div>
+
+      <!-- TOOL 3: PUBLISH AUTO-ROLE BUTTONS -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center">
+            <i data-lucide="check-square" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h4 class="text-xs font-bold text-white uppercase tracking-wider">Đăng Nút Nhận Vai Trò</h4>
+            <p class="text-[11px] text-slate-400">Tạo bảng nút bấm Auto-Role lên Discord</p>
+          </div>
+        </div>
+
+        <p class="text-xs text-slate-400">Bấm nút bên dưới để gửi bảng đăng ký vai trò tự động vào kênh chat đang chọn.</p>
+        <button onclick="submitPublishRoleButtons()" class="w-full py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-md shadow-purple-600/20">
+          <i data-lucide="send" class="w-3.5 h-3.5"></i>
+          <span>Đăng Nút Lên Kênh Ngay</span>
+        </button>
+      </div>
+
+    </div>
+
+    <!-- SECTION 4: LIVE AUDIT LOGS -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+        <div class="flex items-center gap-2">
+          <i data-lucide="file-text" class="w-4 h-4 text-indigo-400"></i>
+          <h3 class="text-xs font-bold uppercase tracking-wider text-white">Nhật Ký Sự Kiện Real-Time (Live Audit Logs)</h3>
+        </div>
+        <span class="text-[11px] text-slate-400 font-mono">Tự động cập nhật mỗi 3s</span>
+      </div>
+
+      <div id="logsContainer" class="max-h-60 overflow-y-auto space-y-2 custom-scroll pr-1 font-mono text-xs">
+        <div class="text-slate-500 text-center py-4">Đang tải nhật ký...</div>
+      </div>
+    </div>
+
+    <!-- SECTION 5: GITHUB PUSH & EXPORT -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center">
+            <i data-lucide="folder-git-2" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-sm font-bold text-white">Đẩy Toàn Bộ Project Lên GitHub (1-Click Push)</h2>
+            <p class="text-xs text-slate-400">Tự động đóng gói và đẩy toàn bộ source code sạch lên GitHub mà không cần cài đặt Git trên máy</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+        <div class="space-y-1.5 md:col-span-1">
+          <label class="text-xs font-semibold text-slate-300">GitHub Personal Access Token (PAT):</label>
+          <input id="ghTokenInput" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200 outline-none focus:border-purple-500 transition-colors" />
+          <p class="text-[10px] text-slate-500">Tạo token tại <a href="https://github.com/settings/tokens" target="_blank" class="text-purple-400 hover:underline">github.com/settings/tokens</a> (quyền <code>repo</code>).</p>
+        </div>
+
+        <div class="space-y-1.5 md:col-span-1">
+          <label class="text-xs font-semibold text-slate-300">Tên Repository Trên GitHub:</label>
+          <input id="ghRepoNameInput" type="text" value="QuanGiaHuongNoi-bot-discord" placeholder="QuanGiaHuongNoi-bot-discord" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200 outline-none focus:border-purple-500 transition-colors" />
+          <div class="flex items-center gap-2 pt-1">
+            <input type="checkbox" id="ghIsPrivate" class="rounded border-slate-800 bg-slate-950 text-purple-600 focus:ring-0" />
+            <label for="ghIsPrivate" class="text-[11px] text-slate-400">Đặt Repo ở chế độ Riêng Tư (Private)</label>
+          </div>
+        </div>
+
+        <div class="space-y-1.5 md:col-span-1 flex flex-col justify-end">
+          <button id="btnPushGitHub" onclick="submitPushToGitHub()" class="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-purple-600/20 transition-all">
+            <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+            <span>Đẩy Code Lên GitHub Ngay</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="ghPushResult" class="hidden rounded-xl p-3 border text-xs"></div>
+    </div>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-slate-800 bg-slate-900/60 py-4 px-6 text-center text-xs text-slate-500">
+    AegisBot v14 • Full-Stack Discord Bot Controller • Tích hợp Web Dashboard & Voice Engine 24/7
+  </footer>
+
+  <!-- JAVASCRIPT CONTROLLER SCRIPT -->
+  <script>
+    let liveData = null;
+    let selectedGuildId = '';
+
+    function getBaseUrl() {
+      const custom = document.getElementById('apiBaseUrl').value.trim();
+      if (custom) return custom.replace(/\/$/, '');
+      if (window.location.protocol.startsWith('http')) {
+        return window.location.origin;
+      }
+      return 'http://localhost:3000';
+    }
+
+    function showAlert(msg, isSuccess = true) {
+      const banner = document.getElementById('alertBanner');
+      const text = document.getElementById('alertMessage');
+      const icon = document.getElementById('alertIcon');
+      banner.className = `px-6 py-2.5 text-xs flex items-center justify-between border-b transition-all ${
+        isSuccess ? 'bg-emerald-950/80 border-emerald-800/80 text-emerald-300' : 'bg-rose-950/80 border-rose-800/80 text-rose-300'
+      }`;
+      text.innerText = msg;
+      banner.classList.remove('hidden');
+      setTimeout(() => banner.classList.add('hidden'), 5000);
+    }
+
+    function hideAlert() {
+      document.getElementById('alertBanner').classList.add('hidden');
+    }
+
+    function toggleTokenConfig() {
+      const body = document.getElementById('tokenConfigBody');
+      const icon = document.getElementById('tokenToggleIcon');
+      const text = document.getElementById('tokenToggleText');
+      if (body.classList.contains('hidden')) {
+        body.classList.remove('hidden');
+        text.innerText = 'Thu gọn';
+        icon.style.transform = 'rotate(180deg)';
+      } else {
+        body.classList.add('hidden');
+        text.innerText = 'Mở rộng cấu hình';
+        icon.style.transform = 'rotate(0deg)';
+      }
+    }
+
+    async function refreshData() {
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/bot/status`);
+        if (!res.ok) throw new Error('API offline');
+        const data = await res.json();
+        liveData = data;
+        updateUI();
+      } catch (err) {
+        document.getElementById('botStatusBadge').innerText = 'Offline';
+        document.getElementById('botStatusBadge').className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/30';
+        document.getElementById('botStatusDot').className = 'absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-900 bg-rose-500';
+        document.getElementById('botLatency').innerText = 'Máy chủ backend chưa chạy';
+      }
+    }
+
+    function updateUI() {
+      if (!liveData) return;
+
+      const isConnected = liveData.status === 'connected';
+      const badge = document.getElementById('botStatusBadge');
+      const dot = document.getElementById('botStatusDot');
+      const tag = document.getElementById('botTagName');
+      const latency = document.getElementById('botLatency');
+      const guildsCount = document.getElementById('botGuildsCount');
+
+      if (isConnected && liveData.botUser) {
+        badge.innerText = 'Online 24/7';
+        badge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30';
+        dot.className = 'absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-900 bg-emerald-500';
+        tag.innerText = liveData.botUser.tag;
+        latency.innerText = `Ping: ${liveData.botUser.ping}ms`;
+        guildsCount.innerText = `${liveData.guilds.length} Máy chủ`;
+
+        if (liveData.botUser.avatar) {
+          document.getElementById('botAvatarContainer').innerHTML = `<img src="${liveData.botUser.avatar}" class="w-full h-full object-cover" />`;
+        }
+      } else {
+        badge.innerText = liveData.status === 'connecting' ? 'Connecting...' : 'Chờ Token';
+        badge.className = 'text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30';
+        dot.className = 'absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-900 bg-amber-500';
+      }
+
+      if (liveData.clientIdConfigured) {
+        document.getElementById('inviteBotLink').href = `https://discord.com/api/oauth2/authorize?client_id=${liveData.clientIdConfigured}&permissions=8&scope=bot%20applications.commands`;
+      }
+
+      // Populate Guilds
+      const selectGuild = document.getElementById('selectGuild');
+      const currentSelected = selectGuild.value;
+      selectGuild.innerHTML = '';
+
+      if (liveData.guilds && liveData.guilds.length > 0) {
+        liveData.guilds.forEach((g) => {
+          const opt = document.createElement('option');
+          opt.value = g.id;
+          opt.innerText = `${g.name} (${g.memberCount} members)`;
+          selectGuild.appendChild(opt);
+        });
+        if (currentSelected && liveData.guilds.some((g) => g.id === currentSelected)) {
+          selectGuild.value = currentSelected;
+        }
+        selectedGuildId = selectGuild.value;
+        populateChannels();
+      } else {
+        selectGuild.innerHTML = '<option value="">Chưa tham gia server nào</option>';
+      }
+
+      // Populate Recent Logs
+      if (Array.isArray(liveData.recentLogs)) {
+        const container = document.getElementById('logsContainer');
+        if (liveData.recentLogs.length === 0) {
+          container.innerHTML = '<div class="text-slate-500 text-center py-4">Chưa có nhật ký nào ghi nhận</div>';
+        } else {
+          container.innerHTML = liveData.recentLogs.map((l) => `
+            <div class="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 overflow-hidden">
+                <span class="text-slate-500 shrink-0">[${l.timestamp}]</span>
+                <span class="px-1.5 py-0.5 rounded text-[10px] uppercase font-bold shrink-0 ${
+                  l.severity === 'danger' ? 'bg-rose-500/20 text-rose-300' : l.severity === 'warning' ? 'bg-amber-500/20 text-amber-300' : 'bg-indigo-500/20 text-indigo-300'
+                }">${l.actionType}</span>
+                <span class="text-slate-200 truncate">${l.details}</span>
+              </div>
+              <span class="text-slate-500 text-[10px] shrink-0">${l.executor?.name || 'Bot'}</span>
+            </div>
+          `).join('');
+        }
+      }
+    }
+
+    function onGuildChange() {
+      selectedGuildId = document.getElementById('selectGuild').value;
+      populateChannels();
+    }
+
+    function populateChannels() {
+      if (!liveData || !liveData.guilds) return;
+      const g = liveData.guilds.find((item) => item.id === selectedGuildId) || liveData.guilds[0];
+      if (!g) return;
+
+      const txtSel = document.getElementById('selectTextChannel');
+      const voiceSel = document.getElementById('selectVoiceChannel');
+
+      txtSel.innerHTML = (g.channels || []).map((c) => `<option value="${c.id}">#${c.name}</option>`).join('');
+      voiceSel.innerHTML = (g.voiceChannels || []).map((c) => `<option value="${c.id}">🔊 ${c.name} (${c.memberCount} đang vào)</option>`).join('');
+
+      const voiceBadge = document.getElementById('activeVoiceRoomBadge');
+      const voiceText = document.getElementById('activeVoiceRoomText');
+      const nowPlayingCard = document.getElementById('currentTrackTitle');
+
+      if (g.activeVoice && g.activeVoice.channelName) {
+        voiceBadge.classList.remove('hidden');
+        voiceBadge.classList.add('flex');
+        voiceText.innerText = `Đang ở phòng 🔊 ${g.activeVoice.channelName}`;
+        nowPlayingCard.innerText = g.activeVoice.currentTrack || 'Đang kết nối chờ bài hát...';
+        document.getElementById('queueLengthText').innerText = `Hàng đợi: ${g.activeVoice.queueLength} bài`;
+      } else {
+        voiceBadge.classList.add('hidden');
+        voiceBadge.classList.remove('flex');
+        nowPlayingCard.innerText = 'Chưa có bài hát nào đang phát';
+      }
+    }
+
+    async function submitSaveToken() {
+      const token = document.getElementById('inputBotToken').value.trim();
+      const clientId = document.getElementById('inputClientId').value.trim();
+      if (!token) return showAlert('Vui lòng nhập Token!', false);
+
+      const btn = document.getElementById('btnSaveToken');
+      btn.disabled = true;
+      btn.innerText = 'Đang lưu & đăng nhập...';
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/bot/configure`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, clientId })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showAlert('✅ Lưu Token và khởi động Bot thành công! Bot hiện đã Online 24/7.');
+          refreshData();
+        } else {
+          showAlert(`⚠️ ${data.error || 'Đã lưu nhưng chưa thể đăng nhập. Kiểm tra Token và Privileged Intents.'}`, false);
+        }
+      } catch (err) {
+        showAlert('Lỗi kết nối tới máy chủ API.', false);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="save" class="w-4 h-4"></i><span>Lưu Token & Đăng Nhập Bot Ngay</span>';
+        lucide.createIcons();
+      }
+    }
+
+    async function controlVoice(action) {
+      const voiceChannelId = document.getElementById('selectVoiceChannel').value;
+      const query = document.getElementById('inputSongQuery').value.trim();
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/bot/voice-control`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            guildId: selectedGuildId || undefined,
+            voiceChannelId: voiceChannelId || undefined,
+            action,
+            query: query || undefined
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showAlert(data.message || 'Thực thi lệnh voice thành công!');
+          refreshData();
+        } else {
+          showAlert(`⚠️ ${data.error || 'Lỗi khi điều khiển voice.'}`, false);
+        }
+      } catch {
+        showAlert('Không thể kết nối API.', false);
+      }
+    }
+
+    function onVolumeChange(val) {
+      document.getElementById('volumeText').innerText = `${val}%`;
+      fetch(`${getBaseUrl()}/api/bot/voice-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'volume', volume: Number(val) })
+      }).catch(() => {});
+    }
+
+    async function submitSendMessage() {
+      const channelId = document.getElementById('selectTextChannel').value;
+      const content = document.getElementById('inputMsgContent').value.trim();
+      const embedTitle = document.getElementById('inputEmbedTitle').value.trim();
+      const embedDescription = document.getElementById('inputEmbedDesc').value.trim();
+
+      if (!channelId) return showAlert('Vui lòng chọn kênh văn bản!', false);
+      if (!content && !embedTitle && !embedDescription) return showAlert('Vui lòng nhập nội dung hoặc Embed!', false);
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/bot/send-channel-message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            channelId,
+            content: content || undefined,
+            embedTitle: embedTitle || undefined,
+            embedDescription: embedDescription || undefined
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showAlert('✅ Đã gửi thông báo thành công lên Discord!');
+          document.getElementById('inputMsgContent').value = '';
+          document.getElementById('inputEmbedTitle').value = '';
+          document.getElementById('inputEmbedDesc').value = '';
+          refreshData();
+        } else {
+          showAlert(`⚠️ ${data.error || 'Lỗi khi gửi tin nhắn.'}`, false);
+        }
+      } catch {
+        showAlert('Lỗi kết nối tới API.', false);
+      }
+    }
+
+    async function submitClearMessages() {
+      const channelId = document.getElementById('selectTextChannel').value;
+      const count = Number(document.getElementById('inputClearCount').value) || 10;
+      if (!channelId) return showAlert('Vui lòng chọn kênh cần dọn dẹp!', false);
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/bot/send-channel-message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            channelId,
+            content: `!clear ${count}`
+          })
+        });
+        showAlert(`Đã phát lệnh dọn dẹp ${count} tin nhắn vào kênh!`);
+        refreshData();
+      } catch {
+        showAlert('Lỗi khi gửi lệnh dọn dẹp.', false);
+      }
+    }
+
+    async function submitModMember(action) {
+      const memberId = document.getElementById('inputModMemberId').value.trim();
+      if (!memberId) return showAlert('Vui lòng nhập User ID của thành viên!', false);
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/bot/moderate-member`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            guildId: selectedGuildId || undefined,
+            memberId,
+            action,
+            durationMinutes: 60,
+            reason: 'Thực thi từ Web Control Panel'
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showAlert(data.message || `Đã thực thi ${action} thành công!`);
+          document.getElementById('inputModMemberId').value = '';
+          refreshData();
+        } else {
+          showAlert(`⚠️ ${data.error || 'Lỗi khi xử lý thành viên.'}`, false);
+        }
+      } catch {
+        showAlert('Lỗi kết nối tới server.', false);
+      }
+    }
+
+    async function submitPublishRoleButtons() {
+      const channelId = document.getElementById('selectTextChannel').value;
+      if (!channelId) return showAlert('Vui lòng chọn kênh chat trước!', false);
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/bot/publish-autorole-buttons`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            guildId: selectedGuildId || undefined,
+            channelId
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showAlert(data.message || 'Đã đăng bảng vai trò nút bấm lên Discord!');
+          refreshData();
+        } else {
+          showAlert(`⚠️ ${data.error || 'Lỗi khi đăng nút.'}`, false);
+        }
+      } catch {
+        showAlert('Lỗi kết nối tới API.', false);
+      }
+    }
+
+    async function submitPushToGitHub() {
+      const token = document.getElementById('ghTokenInput').value.trim();
+      const repoName = document.getElementById('ghRepoNameInput').value.trim();
+      const isPrivate = document.getElementById('ghIsPrivate').checked;
+      const resultDiv = document.getElementById('ghPushResult');
+      const btn = document.getElementById('btnPushGitHub');
+
+      if (!token) {
+        showAlert('Vui lòng nhập GitHub Personal Access Token (PAT)!', false);
+        return;
+      }
+      if (!repoName) {
+        showAlert('Vui lòng nhập tên repository!', false);
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="inline-block animate-spin mr-2">⏳</span><span>Đang đẩy code lên GitHub...</span>';
+      resultDiv.className = 'hidden';
+
+      try {
+        const res = await fetch(`${getBaseUrl()}/api/github/push-project`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            githubToken: token,
+            repoName,
+            description: 'Discord Bot QuanGiaHuongNoi - Full-Stack Discord.js v14 Bot + Web Controller',
+            isPrivate
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showAlert('✅ ' + (data.message || 'Đã đẩy dự án thành công lên GitHub!'));
+          resultDiv.className = 'rounded-xl p-3 bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs flex items-center justify-between';
+          resultDiv.innerHTML = `
+            <div class="flex items-center gap-2">
+              <span>🎉 Đã đẩy thành công <b>${data.filesCount || ''} tệp</b> lên repository!</span>
+            </div>
+            <a href="${data.repoUrl}" target="_blank" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold flex items-center gap-1 shadow">
+              <span>Mở Repository</span>
+              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+            </a>
+          `;
+          lucide.createIcons();
+        } else {
+          showAlert('❌ ' + (data.error || 'Lỗi khi đẩy lên GitHub'), false);
+          resultDiv.className = 'rounded-xl p-3 bg-rose-950/60 border border-rose-800 text-rose-300 text-xs';
+          resultDiv.innerText = `Lỗi: ${data.error || 'Không thể đẩy code.'}`;
+        }
+      } catch (err) {
+        showAlert('Lỗi kết nối tới máy chủ.', false);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="upload-cloud" class="w-4 h-4"></i><span>Đẩy Code Lên GitHub Ngay</span>';
+        lucide.createIcons();
+      }
+    }
+
+    // Initialize
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      refreshData();
+      setInterval(refreshData, 3000);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "name": "AegisBot Discord Dashboard & Studio",
+  "description": "Bảng điều khiển quản trị Discord Bot đa năng: tự động phản hồi, phát nhạc, quản lý thành viên, thông báo TikTok/YouTube, auto-role và phân tích server chuyên sâu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
