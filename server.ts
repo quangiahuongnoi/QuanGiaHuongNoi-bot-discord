@@ -36,7 +36,6 @@ import {
   StreamType
 } from '@discordjs/voice';
 import yts from 'yt-search';
-import { Ytdl } from '@distube/ytdl-core';
 import { matchAutoResponse, AutoResponseRule } from './src/bot/logic/autoResponder';
 import { checkModeration, AutoModConfig } from './src/bot/logic/moderationRules';
 import {
@@ -83,7 +82,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_START_TIME = Date.now();
 
-const ytdlClient = new Ytdl();
 const execFileAsync = promisify(execFile);
 
 export interface ResolvedPlayableTrack {
@@ -501,28 +499,9 @@ async function resolveAudioStreamForQuery(
     console.warn('[YouTube Metadata Lookup Notice]:', err?.message);
   }
 
-  // 2. Try the lightweight direct extractor first.
-  try {
-    const info = await ytdlClient.getInfo(videoUrl);
-    const audioFormat = info.formats?.find((f: any) => f.hasAudio && !f.hasVideo && f.url) ||
-      info.formats?.find((f: any) => f.hasAudio && f.url);
-    if (audioFormat?.url) {
-      return {
-        title: info.videoDetails?.title || title,
-        author: info.videoDetails?.author?.name || author,
-        videoUrl,
-        streamUrl: audioFormat.url,
-        thumbnail,
-        durationText,
-        requestedBy,
-        sourceLabel: 'YouTube Direct Audio'
-      };
-    }
-  } catch (err: any) {
-    console.warn('[YouTube Direct Audio Notice]:', err?.message || 'Unable to resolve audio');
-  }
-
-  // 3. Production fallback: resolve the SAME YouTube video with yt-dlp.
+  // Production resolver: use yt-dlp directly for the SAME YouTube video.
+  // @distube/ytdl-core was intentionally removed from this path because its
+  // current client negotiation can hit VISIONOS HTTP 403 responses on Render.
   // This is still the full source audio; never a preview or another video.
   const ytdlpStream = await resolveYouTubeAudioWithYtDlp(videoUrl);
   if (ytdlpStream) {
