@@ -576,11 +576,19 @@ async function startDiscordBotIfConfigured() {
             }
 
             if (member.roles.cache.has(roleId)) {
-              await member.roles.remove(roleId).catch(() => {});
-              await interaction.reply({ content: `➖ Đã gỡ bỏ vai trò **${role.name}** khỏi tài khoản của bạn.`, ephemeral: true });
+              try {
+                await member.roles.remove(roleId);
+                await interaction.reply({ content: `➖ Đã gỡ bỏ vai trò **${role.name}** khỏi tài khoản của bạn.`, ephemeral: true });
+              } catch {
+                await interaction.reply({ content: '❌ Bot không đủ quyền để gỡ vai trò này.', ephemeral: true });
+              }
             } else {
-              await member.roles.add(roleId).catch(() => {});
-              await interaction.reply({ content: `➕ Đã cấp thành công vai trò **${role.name}** cho bạn!`, ephemeral: true });
+              try {
+                await member.roles.add(roleId);
+                await interaction.reply({ content: `➕ Đã cấp thành công vai trò **${role.name}** cho bạn!`, ephemeral: true });
+              } catch {
+                await interaction.reply({ content: '❌ Bot không đủ quyền để cấp vai trò này.', ephemeral: true });
+              }
             }
             return;
           }
@@ -2956,14 +2964,9 @@ async function startServer() {
     }
   });
 
-  // Standalone Web Controller Dashboard Page
+  // Legacy controller path: keep a single source of truth for the Admin Web UI.
   app.get('/control', (req, res) => {
-    const controlFile = path.join(__dirname, 'public', 'control.html');
-    if (fs.existsSync(controlFile)) {
-      res.sendFile(controlFile);
-    } else {
-      res.status(404).send('Web control interface file not found.');
-    }
+    res.redirect(302, '/');
   });
 
   // Serve static public assets
