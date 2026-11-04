@@ -174,7 +174,9 @@ export default function App() {
     customModules?: typeof modulesEnabled,
     customLevelRoles?: LevelRoleRule[],
     customYT?: YouTubeFeed[],
-    customTT?: TikTokFeed[]
+    customTT?: TikTokFeed[],
+    customJoinRoleEnabled?: boolean,
+    customReactionRoles?: ReactionRoleGroup[]
   ) => {
     try {
       await fetch('/api/bot/sync-config', {
@@ -184,9 +186,10 @@ export default function App() {
           commands: customCommands || commands,
           autoResponses: customResponses || autoResponses,
           autoModConfig: customAutoMod || autoModConfig,
-          joinRoleEnabled,
+          joinRoleEnabled: typeof customJoinRoleEnabled === 'boolean' ? customJoinRoleEnabled : joinRoleEnabled,
           modulesEnabled: customModules || modulesEnabled,
           levelRoles: customLevelRoles || levelRoles,
+          reactionRoles: customReactionRoles || reactionRoleGroups,
           youtubeFeeds: customYT || youtubeFeeds,
           tiktokFeeds: customTT || tiktokFeeds
         })
@@ -236,6 +239,15 @@ export default function App() {
               if (Array.isArray(data.socialFeeds.youtube)) setYoutubeFeeds(data.socialFeeds.youtube);
               if (Array.isArray(data.socialFeeds.tiktok)) setTiktokFeeds(data.socialFeeds.tiktok);
             }
+            if (data.config) {
+              if (Array.isArray(data.config.commands)) setCommands(data.config.commands);
+              if (Array.isArray(data.config.autoResponses)) setAutoResponses(data.config.autoResponses);
+              if (data.config.autoModConfig) setAutoModConfig(data.config.autoModConfig);
+              if (typeof data.config.joinRoleEnabled === 'boolean') setJoinRoleEnabled(data.config.joinRoleEnabled);
+              if (data.config.modulesEnabled) setModulesEnabled(prev => ({ ...prev, ...data.config.modulesEnabled }));
+              if (Array.isArray(data.config.levelRoles)) setLevelRoles(data.config.levelRoles);
+              if (Array.isArray(data.config.reactionRoles)) setReactionRoleGroups(data.config.reactionRoles);
+            }
           } else if (data.status === 'connecting') {
             setBotStatus('idle');
           } else {
@@ -248,8 +260,18 @@ export default function App() {
     };
 
     fetchStatus();
+    const analyticsTimer = setInterval(async () => {
+      try {
+        const analyticsRes = await fetch(`/api/bot/analytics?guildId=${activeGuild.id}`);
+        const analyticsData = await analyticsRes.json().catch(() => ({}));
+        if (analyticsRes.ok && analyticsData.ok && analyticsData.analytics) setAnalytics(analyticsData.analytics);
+      } catch {}
+    }, 5000);
     const interval = setInterval(fetchStatus, 4000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      clearInterval(analyticsTimer);
+    };
   }, [activeGuild.id, isAuthenticated]);
 
   const handleToggleModule = (key: keyof typeof modulesEnabled) => {
@@ -269,25 +291,55 @@ export default function App() {
     });
   };
 
-  // Music handlers
-  const handlePlayPause = () => {
-    setIsPlaying(prev => !prev);
+  // Music handlers: control the real Discord voice engine, then mirror UI state.
+  const controlVoiceFromDashboard = async (
+    action: 'pause' | 'skip' | 'previous' | 'volume',
+    payload: Record<string, unknown> = {}
+  ) => {
+    const res = await fetch('/api/bot/voice-control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ guildId: activeGuild.id, action, ...payload })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể điều khiển Voice.');
+    return data;
   };
 
-  const handleNextTrack = () => {
-    const nextIdx = getNextTrackIndex(currentTrackIndex, tracks.length, loopMode);
-    if (nextIdx !== -1) {
-      setCurrentTrackIndex(nextIdx);
+  const handlePlayPause = async () => {
+    try {
+      const data = await controlVoiceFromDashboard('pause');
+      setIsPlaying(Boolean(data.message && data.message.includes('tiếp tục')));
+    } catch {}
+  };
+
+  const handleNextTrack = async () => {
+    try {
+      const data = await controlVoiceFromDashboard('skip');
+      if (data.track) {
+        const idx = tracks.findIndex(track => track.url === data.track.videoUrl || track.title === data.track.title);
+        if (idx >= 0) setCurrentTrackIndex(idx);
+      } else {
+        const idx = getNextTrackIndex(currentTrackIndex, tracks.length, loopMode);
+        if (idx !== -1) setCurrentTrackIndex(idx);
+      }
       setIsPlaying(true);
-    } else {
+    } catch {
       setIsPlaying(false);
     }
   };
 
-  const handlePrevTrack = () => {
-    const prevIdx = getPreviousTrackIndex(currentTrackIndex, tracks.length);
-    setCurrentTrackIndex(prevIdx);
-    setIsPlaying(true);
+  const handlePrevTrack = async () => {
+    try {
+      const data = await controlVoiceFromDashboard('previous');
+      if (data.track) {
+        const idx = tracks.findIndex(track => track.url === data.track.videoUrl || track.title === data.track.title);
+        if (idx >= 0) setCurrentTrackIndex(idx);
+      }
+      setIsPlaying(true);
+    } catch {
+      setIsPlaying(false);
+    }
   };
 
   const handleToggleLoop = () => {
@@ -324,24 +376,29 @@ export default function App() {
     }
   };
 
-  // Member mod handlers (Real server moderation)
-  const handleWarnMember = (memberId: string, reason: string) => {
+  // Member moderation handlers (real Discord actions)
+  const handleWarnMember = async (memberId: string, reason: string) => {
     const member = members.find(m => m.id === memberId);
     if (!member) return;
-
-    setMembers(prev =>
-      prev.map(m => (m.id === memberId ? { ...m, warnings: m.warnings + 1 } : m))
-    );
-
-    addAuditLog({
-      id: `log-${Date.now()}`,
-      timestamp: getNowTime(),
-      actionType: 'MEMBER_WARN',
-      executor: { name: 'Admin Dashboard', isBot: false },
-      target: { name: member.displayName, id: member.id },
-      details: `Cảnh cáo thành viên: ${reason}`,
-      severity: 'warning'
-    });
+    try {
+      const res = await fetch('/api/bot/warn-member', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guildId: activeGuild.id, memberId, reason })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) return;
+      setMembers(prev => prev.map(m => m.id === memberId ? { ...m, warnings: Number(data.warnings || m.warnings + 1) } : m));
+      addAuditLog({
+        id: `log-${Date.now()}`,
+        timestamp: getNowTime(),
+        actionType: 'MEMBER_WARN',
+        executor: { name: 'Admin Dashboard', isBot: false },
+        target: { name: member.displayName, id: member.id },
+        details: `Cảnh cáo thành viên: ${reason}`,
+        severity: 'warning'
+      });
+    } catch {}
   };
 
   const handleTimeoutMember = (memberId: string, durationMinutes: number, reason: string) => {
@@ -662,7 +719,10 @@ export default function App() {
                 onPrevTrack={handlePrevTrack}
                 onToggleLoop={handleToggleLoop}
                 onShuffle={handleShuffle}
-                onSetVolume={(vol) => setVolume(vol)}
+                onSetVolume={async (vol) => {
+                  setVolume(vol);
+                  try { await controlVoiceFromDashboard('volume', { volume: vol }); } catch {}
+                }}
                 onSetEqualizer={(eq) => setEqualizerPreset(eq)}
                 onAddTrack={handleAddTrack}
                 onRemoveTrack={handleRemoveTrack}
@@ -782,13 +842,25 @@ export default function App() {
                 levelRoles={levelRoles}
                 joinRoleEnabled={joinRoleEnabled}
                 onToggleJoinRole={() => {
-                  setJoinRoleEnabled(prev => !prev);
+                  setJoinRoleEnabled(prev => {
+                    const next = !prev;
+                    void syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, undefined, next, reactionRoleGroups);
+                    return next;
+                  });
                 }}
                 onAddReactionRoleGroup={(group) => {
-                  setReactionRoleGroups(prev => [...prev, group]);
+                  setReactionRoleGroups(prev => {
+                    const updated = [...prev, group];
+                    void syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, undefined, joinRoleEnabled, updated);
+                    return updated;
+                  });
                 }}
                 onRemoveReactionRoleGroup={(id) => {
-                  setReactionRoleGroups(prev => prev.filter(g => g.id !== id));
+                  setReactionRoleGroups(prev => {
+                    const updated = prev.filter(g => g.id !== id);
+                    void syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, undefined, joinRoleEnabled, updated);
+                    return updated;
+                  });
                 }}
                 onAddLevelRole={(rule) => {
                   setLevelRoles(prev => {
@@ -819,7 +891,9 @@ export default function App() {
             {currentTab === 'logs' && (
               <LogsView
                 logs={auditLogs}
-                onClearLogs={() => setAuditLogs([])}
+                onClearLogs={async () => {
+                  try { await fetch('/api/bot/logs', { method: 'DELETE' }); } finally { setAuditLogs([]); }
+                }}
                 guild={activeGuild}
               />
             )}
