@@ -531,12 +531,15 @@ async function resolveAudioStreamForQuery(
  */
 async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | null> {
   const executable = process.env.YTDLP_PATH || 'yt-dlp';
-  const client = process.env.YTDLP_PLAYER_CLIENT || 'mweb,tv,web_safari,tv_embedded';
+  // Keep the client set aligned with yt-dlp's current recommended PO-token flow.
+  // tv/web_safari are useful fallbacks, while bgutil provides the mweb PO token.
+  const client = process.env.YTDLP_PLAYER_CLIENT || 'mweb,tv,web_safari';
   const cookiePath = '/tmp/youtube-cookies.txt';
 
   // Render cannot use --cookies-from-browser because there is no browser profile.
   // A Netscape-format cookies file can be supplied securely through a base64 env var.
   const cookieBase64 = (process.env.YOUTUBE_COOKIES_BASE64 || '').trim();
+  console.log('[YouTube Auth] Browser cookies configured:', Boolean(cookieBase64));
   if (cookieBase64) {
     try {
       fs.writeFileSync(cookiePath, Buffer.from(cookieBase64, 'base64'), { mode: 0o600 });
@@ -582,6 +585,9 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
     return streamUrl || null;
   } catch (err: any) {
     const detail = [err?.message, err?.stderr].filter(Boolean).join(' | ');
+    if (/Sign in to confirm you're not a bot|use --cookies-from-browser|use --cookies/i.test(detail) && !cookieBase64) {
+      console.warn('[YouTube Auth Required] Render datacenter IP is being challenged by YouTube. Configure YOUTUBE_COOKIES_BASE64 in Render to authenticate yt-dlp.');
+    }
     console.warn('[yt-dlp Audio Lookup Notice]:', detail || 'Unable to resolve YouTube audio');
     return null;
   } finally {
