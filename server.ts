@@ -94,7 +94,9 @@ interface GuildVoiceSession {
   connection: VoiceConnection;
   player: AudioPlayer;
   queue: ResolvedPlayableTrack[];
+  history: ResolvedPlayableTrack[];
   currentTrack: ResolvedPlayableTrack | null;
+  currentResource?: any;
   isPaused: boolean;
   stay247: boolean;
   volume: number;
@@ -133,6 +135,13 @@ export interface UserXPData {
   lastMessageTime: number;
 }
 const userXPStore = new Map<string, UserXPData>();
+const userWarningStore = new Map<string, number>();
+const messageHourlyCounts = Array.from({ length: 24 }, () => 0);
+const voiceHourlyMinutes = Array.from({ length: 24 }, () => 0);
+const channelMessageCounts = new Map<string, number>();
+const memberJoinEvents: number[] = [];
+const moderationStats = { warns: 0, timeouts: 0, kicks: 0, bans: 0 };
+const voiceJoinTimes = new Map<string, number>();
 
 let liveSocialFeeds = {
   youtube: [...INITIAL_YOUTUBE_FEEDS] as YouTubeFeed[],
@@ -338,6 +347,9 @@ async function findUserVoiceChannel(
 }
 
 async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPlayableTrack) {
+  if (session.currentTrack && session.currentTrack.videoUrl !== track.videoUrl) {
+    session.history = [session.currentTrack, ...session.history].slice(0, 20);
+  }
   session.currentTrack = track;
   session.isPaused = false;
 
@@ -362,6 +374,7 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
     if (resource.volume) {
       resource.volume.setVolume(session.volume / 100);
     }
+    session.currentResource = resource;
     session.player.play(resource);
   } catch (err: any) {
     console.warn(`[Audio Stream Notice in ${session.channelName}]:`, err?.message);
@@ -402,7 +415,9 @@ async function ensureVoiceSession(
       connection,
       player,
       queue: [],
+      history: [],
       currentTrack: null,
+      currentResource: undefined,
       isPaused: false,
       stay247: true,
       volume: 85
@@ -707,6 +722,8 @@ async function startDiscordBotIfConfigured() {
 
     // Auto-Role on member join
     client.on('guildMemberAdd', async (member) => {
+      memberJoinEvents.push(Date.now());
+      while (memberJoinEvents.length > 5000) memberJoinEvents.shift();
       if (!liveConfig.modulesEnabled.autoRole || !liveConfig.joinRoleEnabled) return;
       try {
         if (liveConfig.defaultMemberRoleId && !member.user.bot) {
@@ -728,6 +745,10 @@ async function startDiscordBotIfConfigured() {
     client.on('messageCreate', async (message) => {
       if (message.author.bot || !message.guild) return;
 
+      const hour = new Date().getHours();
+      messageHourlyCounts[hour] += 1;
+      const telemetryChannel = 'name' in message.channel ? message.channel.name : 'unknown';
+      channelMessageCounts.set(telemetryChannel, (channelMessageCounts.get(telemetryChannel) || 0) + 1);
       const content = message.content;
       const channelName = 'name' in message.channel ? message.channel.name : 'general';
       const authorDisplay = message.member?.displayName || message.author.displayName || message.author.username;
@@ -1319,6 +1340,22 @@ async function startDiscordBotIfConfigured() {
       userXPStore.set(xpKey, userXP);
     });
 
+    client.on('voiceStateUpdate', (oldState, newState) => {
+      const key = `${newState.guild.id}:${newState.id}`;
+      if (!oldState.channelId && newState.channelId) {
+        voiceJoinTimes.set(key, Date.now());
+        appendLog({ actionType: 'VOICE_JOIN', executor: { name: newState.member?.user.tag || 'Discord User', isBot: false }, target: { name: newState.member?.displayName || newState.id, id: newState.id }, details: `Tham gia Voice: ${newState.channel?.name || 'unknown'}`, severity: 'info' });
+      } else if (oldState.channelId && !newState.channelId) {
+        const startedAt = voiceJoinTimes.get(key);
+        if (startedAt) voiceHourlyMinutes[new Date(startedAt).getHours()] += Math.max(0, (Date.now() - startedAt) / 60000);
+        voiceJoinTimes.delete(key);
+      } else if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
+        const startedAt = voiceJoinTimes.get(key);
+        if (startedAt) voiceHourlyMinutes[new Date(startedAt).getHours()] += Math.max(0, (Date.now() - startedAt) / 60000);
+        voiceJoinTimes.set(key, Date.now());
+      }
+    });
+
     client.on('error', (err) => {
       botConnectionStatus = 'error';
       botConnectionError = err.message;
@@ -1904,7 +1941,7 @@ async function startServer() {
                   status: m.presence?.status || 'offline',
                   joinedAt: m.joinedAt?.toLocaleDateString('vi-VN') || '',
                   roles: m.roles.cache.map((r) => r.id),
-                  warnings: 0,
+                  warnings: userWarningStore.get(`${g.id}:${m.id}`) || 0,
                   xp: xpData?.xp || 0,
                   level: xpData?.level || 0
                 };
@@ -1944,7 +1981,17 @@ async function startServer() {
         running: socialMonitorRunning,
         lastResult: lastSocialMonitorResult
       },
-      socialFeeds: liveSocialFeeds
+      socialFeeds: liveSocialFeeds,
+      config: {
+        commands: liveConfig.commands,
+        autoResponses: liveConfig.autoResponses,
+        autoModConfig: liveConfig.autoModConfig,
+        joinRoleEnabled: liveConfig.joinRoleEnabled,
+        defaultMemberRoleId: liveConfig.defaultMemberRoleId,
+        modulesEnabled: liveConfig.modulesEnabled,
+        levelRoles: liveConfig.levelRoles,
+        reactionRoles: liveConfig.reactionRoles
+      }
     });
   });
 
@@ -2028,21 +2075,28 @@ async function startServer() {
       if (action === 'skip') {
         const next = session.queue.shift();
         if (next) {
-          playTrackInSession(session, next);
+          await playTrackInSession(session, next);
           return res.json({ ok: true, message: `Đã chuyển sang bài: ${next.title}` });
-        } else {
-          session.player.stop();
-          session.currentTrack = null;
-          return res.json({ ok: true, message: 'Đã bỏ qua bài hát hiện tại.' });
         }
+        session.player.stop();
+        session.currentTrack = null;
+        session.currentResource = undefined;
+        return res.json({ ok: true, message: 'Đã bỏ qua bài hát hiện tại.' });
+      }
+
+      if (action === 'previous' || action === 'prev') {
+        const previous = session.history.shift();
+        if (!previous) return res.status(409).json({ ok: false, error: 'Chưa có bài hát trước đó trong lịch sử phát.' });
+        if (session.currentTrack) session.queue.unshift(session.currentTrack);
+        session.currentTrack = null;
+        await playTrackInSession(session, previous);
+        return res.json({ ok: true, message: `Đã quay lại bài: ${previous.title}`, track: previous, channelName: targetVoice.name });
       }
 
       if (action === 'volume') {
-        const session = guildVoiceSessions.get(targetGuild.id);
         const vol = typeof req.body.volume === 'number' ? Math.max(0, Math.min(100, req.body.volume)) : 80;
-        if (session) {
-          session.volume = vol;
-        }
+        session.volume = vol;
+        if (session.currentResource?.volume) session.currentResource.volume.setVolume(vol / 100);
         return res.json({ ok: true, message: `Đã chỉnh âm lượng phòng Voice thành ${vol}%.` });
       }
 
@@ -2064,6 +2118,7 @@ async function startServer() {
       joinRoleEnabled,
       modulesEnabled,
       levelRoles,
+      reactionRoles,
       youtubeFeeds,
       tiktokFeeds
     } = req.body;
@@ -2073,6 +2128,7 @@ async function startServer() {
     if (typeof joinRoleEnabled === 'boolean') liveConfig.joinRoleEnabled = joinRoleEnabled;
     if (modulesEnabled) liveConfig.modulesEnabled = { ...liveConfig.modulesEnabled, ...modulesEnabled };
     if (Array.isArray(levelRoles)) liveConfig.levelRoles = levelRoles;
+    if (Array.isArray(reactionRoles)) liveConfig.reactionRoles = reactionRoles;
     if (Array.isArray(youtubeFeeds)) liveSocialFeeds.youtube = youtubeFeeds;
     if (Array.isArray(tiktokFeeds)) liveSocialFeeds.tiktok = tiktokFeeds;
 
@@ -2230,10 +2286,12 @@ async function startServer() {
           envContent = (envContent.trim() ? envContent.trim() + '\n' : '') + `${k}="${v}"\n`;
         }
       };
-      if (token) setEnvVar('DISCORD_BOT_TOKEN', token.trim());
-      if (clientId) setEnvVar('DISCORD_CLIENT_ID', clientId.trim());
-      if (defaultMemberRoleId !== undefined) setEnvVar('DEFAULT_MEMBER_ROLE_ID', defaultMemberRoleId.trim());
-      fs.writeFileSync(envPath, envContent, 'utf-8');
+      if (process.env.NODE_ENV !== 'production') {
+        if (token) setEnvVar('DISCORD_BOT_TOKEN', token.trim());
+        if (clientId) setEnvVar('DISCORD_CLIENT_ID', clientId.trim());
+        if (defaultMemberRoleId !== undefined) setEnvVar('DEFAULT_MEMBER_ROLE_ID', defaultMemberRoleId.trim());
+        fs.writeFileSync(envPath, envContent, 'utf-8');
+      }
     } catch (e: any) {
       console.warn('Could not write to .env:', e?.message);
     }
