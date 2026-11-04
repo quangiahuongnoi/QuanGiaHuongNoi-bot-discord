@@ -2944,9 +2944,14 @@ async function startServer() {
 
       return res.status(400).json({ ok: false, error: 'Hành động Voice không hợp lệ.' });
     } catch (err: any) {
-      return res.status(500).json({
+      const message = err?.message || 'Lỗi khi điều khiển phòng Voice trên Discord.';
+      const voiceNetworkError =
+        /IP discovery|UDP|Voice không thể hoàn tất|Voice chưa sẵn sàng/i.test(message);
+
+      return res.status(voiceNetworkError ? 503 : 500).json({
         ok: false,
-        error: err?.message || 'Lỗi khi điều khiển phòng Voice trên Discord.'
+        error: message,
+        code: voiceNetworkError ? 'VOICE_UDP_UNAVAILABLE' : 'VOICE_CONTROL_ERROR'
       });
     }
   });
