@@ -416,10 +416,10 @@ async function resolveAudioStreamForQuery(
  */
 async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | null> {
   const executable = process.env.YTDLP_PATH || 'yt-dlp';
-  const client = process.env.YTDLP_PLAYER_CLIENT || 'web_safari';
+  const client = process.env.YTDLP_PLAYER_CLIENT || 'mweb,tv,web_safari';
 
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout, stderr } = await execFileAsync(
       executable,
       [
         '--no-warnings',
@@ -428,6 +428,8 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
         '--get-url',
         '--js-runtimes',
         'node',
+        '--remote-components',
+        'ejs:github',
         '--extractor-args',
         `youtube:player_client=${client}`,
         '--format',
@@ -446,9 +448,13 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
       .map((line) => line.trim())
       .find((line) => /^https?:\/\//i.test(line));
 
+    if (!streamUrl && stderr) {
+      console.warn('[yt-dlp Audio Lookup Notice]:', stderr.slice(-2500));
+    }
     return streamUrl || null;
   } catch (err: any) {
-    console.warn('[yt-dlp Audio Lookup Notice]:', err?.message || 'Unable to resolve YouTube audio');
+    const detail = [err?.message, err?.stderr].filter(Boolean).join(' | ');
+    console.warn('[yt-dlp Audio Lookup Notice]:', detail || 'Unable to resolve YouTube audio');
     return null;
   }
 }
