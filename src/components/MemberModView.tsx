@@ -21,10 +21,10 @@ interface MemberModViewProps {
   members: Member[];
   autoModConfig: AutoModConfig;
   onUpdateAutoMod: (config: AutoModConfig) => void;
-  onWarnMember: (memberId: string, reason: string) => void;
-  onTimeoutMember: (memberId: string, durationMinutes: number, reason: string) => void;
-  onKickMember: (memberId: string, reason: string) => void;
-  onBanMember: (memberId: string, reason: string) => void;
+  onWarnMember: (memberId: string, reason: string) => void | Promise<boolean>;
+  onTimeoutMember: (memberId: string, durationMinutes: number, reason: string) => void | Promise<boolean>;
+  onKickMember: (memberId: string, reason: string) => void | Promise<boolean>;
+  onBanMember: (memberId: string, reason: string) => void | Promise<boolean>;
   guild: GuildInfo;
 }
 
@@ -60,24 +60,29 @@ export const MemberModView: React.FC<MemberModViewProps> = ({
     return m.status === statusFilter;
   });
 
-  const handleExecuteModAction = (e: React.FormEvent) => {
+  const handleExecuteModAction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMember || !actionType) return;
 
+    let ok = false;
     if (actionType === 'WARN') {
-      onWarnMember(selectedMember.id, actionReason);
-      setActionSuccessNotice(`Đã gửi cảnh cáo đến ${selectedMember.displayName}.`);
+      ok = (await onWarnMember(selectedMember.id, actionReason)) !== false;
     } else if (actionType === 'TIMEOUT') {
-      onTimeoutMember(selectedMember.id, timeoutMinutes, actionReason);
-      setActionSuccessNotice(`Đã áp dụng timeout ${timeoutMinutes} phút cho ${selectedMember.displayName}.`);
+      ok = (await onTimeoutMember(selectedMember.id, timeoutMinutes, actionReason)) !== false;
     } else if (actionType === 'KICK') {
-      onKickMember(selectedMember.id, actionReason);
-      setActionSuccessNotice(`Đã kick ${selectedMember.displayName} khỏi máy chủ.`);
+      ok = (await onKickMember(selectedMember.id, actionReason)) !== false;
     } else if (actionType === 'BAN') {
-      onBanMember(selectedMember.id, actionReason);
-      setActionSuccessNotice(`Đã ban vĩnh viễn ${selectedMember.displayName} khỏi máy chủ.`);
+      ok = (await onBanMember(selectedMember.id, actionReason)) !== false;
     }
 
+    if (!ok) {
+      setActionSuccessNotice('⚠️ Discord không xác nhận được thao tác. Kiểm tra quyền Bot và thử lại.');
+      setTimeout(() => setActionSuccessNotice(null), 3500);
+      return;
+    }
+
+    const label = actionType === 'WARN' ? 'cảnh cáo' : actionType === 'TIMEOUT' ? `timeout ${timeoutMinutes} phút` : actionType === 'KICK' ? 'kick' : 'ban vĩnh viễn';
+    setActionSuccessNotice(`✅ Đã ${label} ${selectedMember.displayName}.`);
     setActionType(null);
     setSelectedMember(null);
     setTimeout(() => setActionSuccessNotice(null), 3000);
