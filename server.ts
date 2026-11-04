@@ -2026,9 +2026,11 @@ async function startServer() {
                 ? {
                     channelId: voiceSession.channelId,
                     channelName: voiceSession.channelName,
-                    currentTrack: voiceSession.currentTrack?.title || null,
+                    currentTrack: voiceSession.currentTrack || null,
                     isPaused: voiceSession.isPaused,
-                    queueLength: voiceSession.queue.length
+                    queue: voiceSession.queue,
+                    queueLength: voiceSession.queue.length,
+                    volume: voiceSession.volume
                   }
                 : null
             };
@@ -2090,16 +2092,108 @@ async function startServer() {
         return res.status(404).json({ ok: false, error: 'Bot chưa tham gia máy chủ Discord nào.' });
       }
 
+      // Controls that operate on an existing session must not require the admin
+      // to personally sit in a Voice channel.
+      const existingSession = guildVoiceSessions.get(targetGuild.id);
+
       if (action === 'leave') {
-        const session = guildVoiceSessions.get(targetGuild.id);
-        if (session) {
-          session.player.stop();
-          session.connection.destroy();
-          guildVoiceSessions.delete(targetGuild.id);
+        if (!existingSession) {
+          return res.json({ ok: true, message: 'Bot hiện không ở trong kênh Voice nào.' });
         }
+        existingSession.player.stop();
+        existingSession.connection.destroy();
+        guildVoiceSessions.delete(targetGuild.id);
         return res.json({ ok: true, message: 'Bot đã rời khỏi kênh Voice.' });
       }
 
+      if (action === 'pause' || action === 'skip' || action === 'previous' || action === 'prev' || action === 'volume') {
+        if (!existingSession) {
+          return res.status(404).json({
+            ok: false,
+            error: 'Bot chưa có phiên Voice đang hoạt động trên máy chủ này.'
+          });
+        }
+
+        if (action === 'pause') {
+          if (!existingSession.currentTrack) {
+            return res.status(409).json({ ok: false, error: 'Hiện không có bài hát đang phát.' });
+          }
+          if (existingSession.isPaused) {
+            existingSession.player.unpause();
+            existingSession.isPaused = false;
+          } else {
+            existingSession.player.pause();
+            existingSession.isPaused = true;
+          }
+          return res.json({
+            ok: true,
+            message: existingSession.isPaused ? 'Đã tạm dừng phát nhạc.' : 'Đã tiếp tục phát nhạc.',
+            track: existingSession.currentTrack,
+            isPaused: existingSession.isPaused,
+            channelName: existingSession.channelName
+          });
+        }
+
+        if (action === 'skip') {
+          const next = existingSession.queue.shift();
+          if (next) {
+            await playTrackInSession(existingSession, next);
+            return res.json({
+              ok: true,
+              message: `Đã chuyển sang bài: ${next.title}`,
+              track: next,
+              queued: true,
+              queueLength: existingSession.queue.length,
+              channelName: existingSession.channelName
+            });
+          }
+          existingSession.player.stop();
+          existingSession.currentTrack = null;
+          existingSession.currentResource = undefined;
+          return res.json({
+            ok: true,
+            message: 'Đã bỏ qua bài hát hiện tại.',
+            track: null,
+            queued: false,
+            queueLength: 0,
+            channelName: existingSession.channelName
+          });
+        }
+
+        if (action === 'previous' || action === 'prev') {
+          const previous = existingSession.history.shift();
+          if (!previous) {
+            return res.status(409).json({ ok: false, error: 'Chưa có bài hát trước đó trong lịch sử phát.' });
+          }
+          if (existingSession.currentTrack) existingSession.queue.unshift(existingSession.currentTrack);
+          existingSession.currentTrack = null;
+          await playTrackInSession(existingSession, previous);
+          return res.json({
+            ok: true,
+            message: `Đã quay lại bài: ${previous.title}`,
+            track: previous,
+            queueLength: existingSession.queue.length,
+            channelName: existingSession.channelName
+          });
+        }
+
+        const vol = typeof req.body.volume === 'number'
+          ? Math.max(0, Math.min(100, req.body.volume))
+          : 80;
+        existingSession.volume = vol;
+        if (existingSession.currentResource?.volume) {
+          existingSession.currentResource.volume.setVolume(vol / 100);
+        }
+        return res.json({
+          ok: true,
+          message: `Đã chỉnh âm lượng phòng Voice thành ${vol}%.`,
+          volume: vol,
+          channelName: existingSession.channelName
+        });
+      }
+
+      // Join/play actions may target a selected Voice channel or fall back to the
+      // active Voice channel / existing session.
       const { channel: targetVoice } = await findUserVoiceChannel(
         targetGuild,
         undefined,
@@ -2142,53 +2236,12 @@ async function startServer() {
           message: `Đang phát "${track.title}" trực tiếp trong phòng 🔊 ${targetVoice.name}!`,
           track,
           queued: false,
+          queueLength: session.queue.length,
           channelName: targetVoice.name
         });
       }
 
-      if (action === 'pause') {
-        if (session.isPaused) {
-          session.player.unpause();
-          session.isPaused = false;
-        } else {
-          session.player.pause();
-          session.isPaused = true;
-        }
-        return res.json({
-          ok: true,
-          message: session.isPaused ? 'Đã tạm dừng phát nhạc.' : 'Đã tiếp tục phát nhạc.'
-        });
-      }
-
-      if (action === 'skip') {
-        const next = session.queue.shift();
-        if (next) {
-          await playTrackInSession(session, next);
-          return res.json({ ok: true, message: `Đã chuyển sang bài: ${next.title}` });
-        }
-        session.player.stop();
-        session.currentTrack = null;
-        session.currentResource = undefined;
-        return res.json({ ok: true, message: 'Đã bỏ qua bài hát hiện tại.' });
-      }
-
-      if (action === 'previous' || action === 'prev') {
-        const previous = session.history.shift();
-        if (!previous) return res.status(409).json({ ok: false, error: 'Chưa có bài hát trước đó trong lịch sử phát.' });
-        if (session.currentTrack) session.queue.unshift(session.currentTrack);
-        session.currentTrack = null;
-        await playTrackInSession(session, previous);
-        return res.json({ ok: true, message: `Đã quay lại bài: ${previous.title}`, track: previous, channelName: targetVoice.name });
-      }
-
-      if (action === 'volume') {
-        const vol = typeof req.body.volume === 'number' ? Math.max(0, Math.min(100, req.body.volume)) : 80;
-        session.volume = vol;
-        if (session.currentResource?.volume) session.currentResource.volume.setVolume(vol / 100);
-        return res.json({ ok: true, message: `Đã chỉnh âm lượng phòng Voice thành ${vol}%.` });
-      }
-
-      return res.json({ ok: true, message: 'Đã thực thi lệnh điều khiển Voice.' });
+      return res.status(400).json({ ok: false, error: 'Hành động Voice không hợp lệ.' });
     } catch (err: any) {
       return res.status(500).json({
         ok: false,
@@ -2573,11 +2626,15 @@ async function startServer() {
   // 6. Send real message via Discord Webhook URL (Instant zero-setup live test on user's server)
   app.post('/api/bot/send-webhook', async (req, res) => {
     const { webhookUrl, username, content, embedTitle, embedDescription, embedColor } = req.body;
-    if (!webhookUrl || typeof webhookUrl !== 'string' || !webhookUrl.startsWith('https://discord')) {
-      return res.status(400).json({
-        ok: false,
-        error: 'URL Webhook Discord không hợp lệ.'
-      });
+    let webhook: URL;
+    try {
+      webhook = new URL(String(webhookUrl || '').trim());
+    } catch {
+      return res.status(400).json({ ok: false, error: 'URL Webhook Discord không hợp lệ.' });
+    }
+    const allowedHosts = new Set(['discord.com', 'discordapp.com', 'canary.discord.com', 'ptb.discord.com']);
+    if (webhook.protocol !== 'https:' || !allowedHosts.has(webhook.hostname) || !webhook.pathname.startsWith('/api/webhooks/')) {
+      return res.status(400).json({ ok: false, error: 'URL Webhook Discord không hợp lệ.' });
     }
 
     try {
@@ -2655,6 +2712,9 @@ async function startServer() {
     }
     return results;
   }
+
+  // GitHub/project-management APIs are admin-only.
+  app.use('/api/github', requireAdmin);
 
   // 7. List all project files ready for GitHub Push
   app.get('/api/github/project-files', (req, res) => {
