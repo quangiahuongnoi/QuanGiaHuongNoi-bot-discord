@@ -159,6 +159,13 @@ function appendLog(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>) {
     timestamp: timeStr
   };
   liveAuditLogs = [fullEntry, ...liveAuditLogs.slice(0, 99)];
+  switch (entry.actionType) {
+    case 'MEMBER_WARN': moderationStats.warns += 1; break;
+    case 'MEMBER_TIMEOUT': moderationStats.timeouts += 1; break;
+    case 'MEMBER_KICK': moderationStats.kicks += 1; break;
+    case 'MEMBER_BAN': moderationStats.bans += 1; break;
+    default: break;
+  }
 }
 
 /**
