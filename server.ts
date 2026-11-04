@@ -416,7 +416,7 @@ async function resolveAudioStreamForQuery(
  */
 async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | null> {
   const executable = process.env.YTDLP_PATH || 'yt-dlp';
-  const client = process.env.YTDLP_PLAYER_CLIENT || 'mweb,tv,web_safari';
+  const client = process.env.YTDLP_PLAYER_CLIENT || 'tv_simply,web_safari,mweb,tv';
 
   try {
     const { stdout, stderr } = await execFileAsync(
@@ -431,7 +431,7 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
         '--remote-components',
         'ejs:github',
         '--extractor-args',
-        `youtube:player_client=${client}`,
+        `youtube:player_client=${client};youtubepot-bgutilscript:server_home=/opt/bgutil-ytdlp-pot-provider/server`,
         '--format',
         'bestaudio/best',
         videoUrl
