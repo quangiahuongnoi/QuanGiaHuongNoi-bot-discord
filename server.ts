@@ -717,41 +717,99 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
   }
 }
 
+const voiceConnectionsWithHandlers = new WeakSet<VoiceConnection>();
+
+function isVoiceIpDiscoveryError(error: unknown): boolean {
+  const message = String((error as any)?.message || error || '');
+  return /Cannot perform IP discovery - socket closed/i.test(message);
+}
+
+function attachVoiceConnectionErrorHandler(
+  guild: Guild,
+  connection: VoiceConnection
+): void {
+  if (voiceConnectionsWithHandlers.has(connection)) return;
+  voiceConnectionsWithHandlers.add(connection);
+
+  connection.on('error', (error) => {
+    const message = error?.message || String(error);
+    console.warn(
+      `[Discord Voice Network Error in ${guild.name}]`,
+      message
+    );
+
+    const currentSession = guildVoiceSessions.get(guild.id);
+    if (!currentSession || currentSession.connection !== connection) return;
+
+    if (currentSession.audioProcess) {
+      try { currentSession.audioProcess.kill('SIGKILL'); } catch {}
+      currentSession.audioProcess = undefined;
+    }
+
+    currentSession.currentResource = undefined;
+    currentSession.isPaused = false;
+
+    // Do not allow an unusable connection/socket to remain registered.
+    guildVoiceSessions.delete(guild.id);
+
+    try {
+      if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+        connection.destroy();
+      }
+    } catch {}
+
+    if (isVoiceIpDiscoveryError(error)) {
+      console.warn(
+        `[Discord Voice Recovery in ${guild.name}] UDP/IP discovery failed; the next Voice command will create a fresh connection.`
+      );
+    }
+  });
+}
+
 async function ensureVoiceSession(
   guild: Guild,
   voiceChannel: VoiceBasedChannel
 ): Promise<GuildVoiceSession> {
   let session = guildVoiceSessions.get(guild.id);
 
-  // Reuse a healthy existing connection. Creating a second VoiceConnection for
-  // the same guild can race Discord's voice state and make dashboard controls
-  // appear to fail even though the bot is already connected.
+  // Reuse the same VoiceConnection and rejoin it when moving channels.
+  // Creating + destroying two connections for one guild can close the UDP
+  // discovery socket while @discordjs/voice is still handshaking.
   if (session) {
     const currentChannel = guild.channels.cache.get(session.channelId);
-    if (currentChannel?.isVoiceBased() && session.connection.state.status !== VoiceConnectionStatus.Destroyed) {
+    if (currentChannel?.isVoiceBased() &&
+        session.connection.state.status !== VoiceConnectionStatus.Destroyed) {
+      attachVoiceConnectionErrorHandler(guild, session.connection);
+
       if (session.channelId !== voiceChannel.id) {
-        const oldConnection = session.connection;
-        const connection = joinVoiceChannel({
-          channelId: voiceChannel.id,
-          guildId: guild.id,
-          adapterCreator: guild.voiceAdapterCreator as any,
-          selfDeaf: true,
-          selfMute: false
+        const moved = session.connection.rejoin({
+          channelId: voiceChannel.id
         });
-        session.connection = connection;
-        session.channelId = voiceChannel.id;
-        session.channelName = voiceChannel.name;
-        try { oldConnection.destroy(); } catch {}
-        connection.subscribe(session.player);
-        try {
-          await entersState(connection, VoiceConnectionStatus.Ready, 8_000);
-        } catch (err: any) {
-          console.warn(`[Voice Move Notice in ${guild.name}]:`, err?.message || 'Voice connection is still connecting');
+
+        if (!moved) {
+          guildVoiceSessions.delete(guild.id);
+          try { session.connection.destroy(); } catch {}
+          session = undefined;
+        } else {
+          session.channelId = voiceChannel.id;
+          session.channelName = voiceChannel.name;
+          session.connection.subscribe(session.player);
+
+          try {
+            await entersState(session.connection, VoiceConnectionStatus.Ready, 12_000);
+          } catch (err: any) {
+            throw new Error(
+              isVoiceIpDiscoveryError(err)
+                ? 'Discord Voice không thể hoàn tất UDP/IP discovery trên máy chủ Render. Kết nối Voice đã được reset; hãy thử lại.'
+                : `Discord Voice chưa sẵn sàng: ${err?.message || 'timeout'}`
+            );
+          }
         }
       } else {
         session.connection.subscribe(session.player);
       }
-      return session;
+
+      if (session) return session;
     }
   }
 
@@ -762,14 +820,15 @@ async function ensureVoiceSession(
     selfDeaf: true,
     selfMute: false
   });
+  attachVoiceConnectionErrorHandler(guild, connection);
+
+  const player = session?.player || createAudioPlayer({
+    behaviors: {
+      noSubscriber: NoSubscriberBehavior.Play
+    }
+  });
 
   if (!session) {
-    const player = createAudioPlayer({
-      behaviors: {
-        noSubscriber: NoSubscriberBehavior.Play
-      }
-    });
-
     session = {
       guildId: guild.id,
       channelId: voiceChannel.id,
@@ -827,14 +886,24 @@ async function ensureVoiceSession(
     session.connection = connection;
     session.channelId = voiceChannel.id;
     session.channelName = voiceChannel.name;
+    attachVoiceConnectionErrorHandler(guild, connection);
   }
 
   connection.subscribe(session.player);
 
   try {
-    await entersState(connection, VoiceConnectionStatus.Ready, 8_000);
-  } catch {
-    // Allow connection to finish handshake asynchronously if gateway is busy
+    await entersState(connection, VoiceConnectionStatus.Ready, 12_000);
+  } catch (err: any) {
+    guildVoiceSessions.delete(guild.id);
+    try {
+      if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+    } catch {}
+
+    throw new Error(
+      isVoiceIpDiscoveryError(err)
+        ? 'Discord Voice không thể hoàn tất UDP/IP discovery trên Render. Render/Discord Voice không thiết lập được UDP handshake.'
+        : `Discord Voice không sẵn sàng: ${err?.message || 'timeout'}`
+    );
   }
 
   return session;
