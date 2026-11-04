@@ -106,6 +106,7 @@ export interface AuditLogEntry {
     | 'MEMBER_BAN'
     | 'MESSAGE_DELETE'
     | 'MESSAGE_EDIT'
+    | 'MESSAGE_CLEAR'
     | 'VOICE_JOIN'
     | 'VOICE_LEAVE'
     | 'ROLE_UPDATE'
