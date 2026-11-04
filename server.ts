@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { execFileSync, spawn } from 'child_process';
+import { execFile, execFileSync, spawn } from 'child_process';
+import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
@@ -83,6 +84,7 @@ const __dirname = path.dirname(__filename);
 const SERVER_START_TIME = Date.now();
 
 const ytdlClient = new Ytdl();
+const execFileAsync = promisify(execFile);
 
 export interface ResolvedPlayableTrack {
   title: string;
@@ -363,7 +365,7 @@ async function resolveAudioStreamForQuery(
     console.warn('[YouTube Metadata Lookup Notice]:', err?.message);
   }
 
-  // 2. Resolve the requested YouTube audio directly. Do not substitute previews or unrelated radio streams.
+  // 2. Try the lightweight direct extractor first.
   try {
     const info = await ytdlClient.getInfo(videoUrl);
     const audioFormat = info.formats?.find((f: any) => f.hasAudio && !f.hasVideo && f.url) ||
@@ -381,10 +383,74 @@ async function resolveAudioStreamForQuery(
       };
     }
   } catch (err: any) {
-    console.warn('[YouTube Audio Lookup Notice]:', err?.message || 'Unable to resolve audio');
+    console.warn('[YouTube Direct Audio Notice]:', err?.message || 'Unable to resolve audio');
   }
 
-  throw new Error('Không thể lấy audio đầy đủ của bài hát từ YouTube tại thời điểm này. Không dùng preview ngắn hoặc stream bài khác làm fallback.');
+  // 3. Production fallback: resolve the SAME YouTube video with yt-dlp.
+  // This is still the full source audio; never a preview or another video.
+  const ytdlpStream = await resolveYouTubeAudioWithYtDlp(videoUrl);
+  if (ytdlpStream) {
+    return {
+      title,
+      author,
+      videoUrl,
+      streamUrl: ytdlpStream,
+      thumbnail,
+      durationText,
+      requestedBy,
+      sourceLabel: 'YouTube yt-dlp Audio'
+    };
+  }
+
+  throw new Error('Không thể lấy audio đầy đủ của bài hát từ YouTube tại thời điểm này. YouTube không cung cấp stream audio khả dụng cho bot. Không dùng preview ngắn hoặc stream bài khác làm fallback.');
+}
+
+/**
+ * Resolve a full YouTube audio URL through the yt-dlp CLI.
+ *
+ * YouTube has been tightening direct GVS/SABR access and @distube/ytdl-core
+ * can therefore return no usable audio-only format even when the video itself
+ * is playable. yt-dlp is used as the production fallback, with the Safari
+ * client because it can expose HLS formats that currently avoid some of the
+ * PO-token restrictions. No preview or unrelated stream is ever substituted.
+ */
+async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | null> {
+  const executable = process.env.YTDLP_PATH || 'yt-dlp';
+  const client = process.env.YTDLP_PLAYER_CLIENT || 'web_safari';
+
+  try {
+    const { stdout } = await execFileAsync(
+      executable,
+      [
+        '--no-warnings',
+        '--no-playlist',
+        '--skip-download',
+        '--get-url',
+        '--js-runtimes',
+        'node',
+        '--extractor-args',
+        `youtube:player_client=${client}`,
+        '--format',
+        'bestaudio/best',
+        videoUrl
+      ],
+      {
+        timeout: 30000,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true
+      }
+    );
+
+    const streamUrl = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => /^https?:\/\//i.test(line));
+
+    return streamUrl || null;
+  } catch (err: any) {
+    console.warn('[yt-dlp Audio Lookup Notice]:', err?.message || 'Unable to resolve YouTube audio');
+    return null;
+  }
 }
 
 /**
