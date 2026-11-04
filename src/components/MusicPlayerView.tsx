@@ -103,7 +103,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
   }, []);
 
   const handleControlRealVoice = async (
-    action: 'join' | 'play' | 'pause' | 'skip' | 'leave',
+    action: 'join' | 'play' | 'pause' | 'skip' | 'stop' | 'leave',
     customQuery?: string
   ) => {
     setIsControllingVoice(true);
@@ -302,6 +302,26 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
           >
             <Play className="w-3.5 h-3.5 fill-current" />
             <span>Phát Lên Server Thật</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isControllingVoice}
+            onClick={() => handleControlRealVoice('skip')}
+            className="px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+          >
+            <SkipForward className="w-3.5 h-3.5" />
+            <span>Bỏ Qua Server</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isControllingVoice}
+            onClick={() => handleControlRealVoice('stop')}
+            className="px-3.5 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+          >
+            <Square className="w-3.5 h-3.5 fill-current" />
+            <span>Dừng Server</span>
           </button>
 
           <button
