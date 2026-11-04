@@ -110,7 +110,9 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
     try {
       const res = await fetch('/api/bot/voice-control', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           guildId: guild.id,
           voiceChannelId: selectedVoiceChannelId || undefined,
@@ -118,7 +120,21 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
           query: customQuery || currentTrack?.title || 'Chìm Sâu RPT MCK'
         })
       });
-      const data = await res.json();
+
+      const raw = await res.text();
+      let data: any = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error(
+          res.status === 401
+            ? 'Phiên đăng nhập Admin đã hết hạn. Hãy đăng nhập lại.'
+            : res.status >= 500
+              ? 'Máy chủ Admin đang khởi động lại hoặc gặp lỗi. Vui lòng thử lại sau vài giây.'
+              : 'API Voice trả về dữ liệu không hợp lệ.'
+        );
+      }
+
       if (res.ok && data.ok) {
         if (data.channelName) setActiveLiveVoiceName(data.channelName);
         if (action === 'leave') setActiveLiveVoiceName(null);
@@ -127,8 +143,8 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
         setLiveVoiceNotice(data.error || 'Hãy gõ !play hoặc !join trực tiếp trong Discord.');
       }
       setTimeout(() => setLiveVoiceNotice(null), 4500);
-    } catch {
-      setLiveVoiceNotice('Không thể gửi lệnh điều khiển Voice lúc này.');
+    } catch (err: any) {
+      setLiveVoiceNotice(err?.message || 'Không thể gửi lệnh điều khiển Voice lúc này.');
       return null;
     } finally {
       setIsControllingVoice(false);
