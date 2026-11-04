@@ -46,6 +46,19 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         }))
       : analytics.topMembers;
 
+  const growthWindow = analytics.memberGrowth.slice(timeRange === '7d' ? -7 : -30);
+  const recentJoins = growthWindow.reduce((sum, item) => sum + item.joins, 0);
+  const peakHourItem = analytics.hourlyActivity.reduce(
+    (best, item) => item.messages > best.messages ? item : best,
+    { hour: 0, messages: 0, voiceMinutes: 0 }
+  );
+  const totalVoiceHours = analytics.hourlyActivity.reduce((sum, item) => sum + item.voiceMinutes, 0) / 60;
+  const moderationActions =
+    analytics.modSummary.warns +
+    analytics.modSummary.timeouts +
+    analytics.modSummary.kicks +
+    analytics.modSummary.bans;
+
   const maxHourlyMessages = Math.max(...analytics.hourlyActivity.map(h => h.messages), 1);
   const maxHourlyVoice = Math.max(...analytics.hourlyActivity.map(h => h.voiceMinutes), 1);
 
@@ -61,7 +74,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Theo dõi biểu đồ tăng trưởng thành viên, lưu lượng tin nhắn theo giờ và bảng xếp hạng thành viên tích cực
+            Dữ liệu lấy trực tiếp từ runtime Bot/Discord. Số liệu được tính từ lúc service khởi động và không giả lập lịch sử
           </p>
         </div>
 
@@ -96,9 +109,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-white font-mono tabular-nums">
-              +62
+              +{recentJoins}
             </span>
-            <span className="text-xs text-emerald-400 font-medium">+3.5% tuần này</span>
+            <span className="text-xs text-emerald-400 font-medium">tham gia trong runtime</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
             Tổng cộng: <strong className="text-slate-300 font-mono">{guild.memberCount}</strong> thành viên
@@ -112,11 +125,11 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-white font-mono">
-              20:00 - 22:00
+              {peakHourItem.hour.toString().padStart(2, '0')}:00
             </span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
-            Đạt đỉnh <strong className="text-slate-300 font-mono">1,320 tin nhắn/giờ</strong>
+            Cao nhất <strong className="text-slate-300 font-mono">{peakHourItem.messages.toLocaleString()} tin nhắn/giờ</strong>
           </div>
         </div>
 
@@ -127,9 +140,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-white font-mono tabular-nums">
-              182.5 giờ
+              {totalVoiceHours.toFixed(1)} giờ
             </span>
-            <span className="text-xs text-indigo-400 font-medium">+14% so với tuần trước</span>
+            <span className="text-xs text-indigo-400 font-medium">runtime telemetry</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
             Chủ yếu tại <strong className="text-slate-300">Phòng Voice 01</strong>
@@ -143,12 +156,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-white font-mono">
-              99.8%
+              {moderationActions}
             </span>
-            <span className="text-xs text-emerald-400 font-medium">Bảo vệ tự động</span>
+            <span className="text-xs text-emerald-400 font-medium">lượt moderation</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
-            Đã chặn <strong className="text-slate-300">42 link mời spam</strong>
+            Warn <strong className="text-slate-300">{analytics.modSummary.warns}</strong> · Timeout <strong className="text-slate-300">{analytics.modSummary.timeouts}</strong>
           </div>
         </div>
       </div>
