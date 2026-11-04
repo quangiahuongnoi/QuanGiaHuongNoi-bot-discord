@@ -28,4 +28,6 @@ ENV PORT=10000
 
 EXPOSE 10000
 
-CMD ["npm", "start"]
+# Keep the bgutil PO-token provider running locally beside the bot.
+# yt-dlp connects to it through http://127.0.0.1:4416.
+CMD ["sh", "-c", "node /opt/bgutil-ytdlp-pot-provider/server/build/main.js --host 127.0.0.1 --port 4416 & exec npm start"]
