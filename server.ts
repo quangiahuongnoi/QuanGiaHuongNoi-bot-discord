@@ -496,7 +496,8 @@ async function resolveAudioStreamForQuery(
       }
     }
   } catch (err: any) {
-    console.warn('[YouTube Metadata Lookup Notice]:', err?.message);
+    const detail = err?.message || String(err || 'Unknown metadata lookup error');
+    console.warn('[YouTube Metadata Lookup Notice]:', detail);
   }
 
   // Production resolver: use yt-dlp directly for the SAME YouTube video.
@@ -832,6 +833,56 @@ function attachVoiceConnectionErrorHandler(
   });
 }
 
+async function createReadyVoiceConnection(
+  guild: Guild,
+  voiceChannel: VoiceBasedChannel,
+  player: AudioPlayer
+): Promise<VoiceConnection> {
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const connection = joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: guild.id,
+      adapterCreator: guild.voiceAdapterCreator as any,
+      selfDeaf: true,
+      selfMute: false
+    });
+
+    attachVoiceConnectionErrorHandler(guild, connection);
+    connection.subscribe(player);
+
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, 12_000);
+      return connection;
+    } catch (err: any) {
+      lastError = err;
+
+      try {
+        if (connection.state.status !== VoiceConnectionStatus.Destroyed) {
+          connection.destroy();
+        }
+      } catch {}
+
+      if (attempt < 2 && isVoiceIpDiscoveryError(err)) {
+        console.warn(
+          `[Discord Voice Recovery in ${guild.name}] UDP/IP discovery failed; retrying Voice connection once.`
+        );
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        continue;
+      }
+
+      break;
+    }
+  }
+
+  throw new Error(
+    isVoiceIpDiscoveryError(lastError)
+      ? 'Discord Voice không thể hoàn tất UDP/IP discovery trên Render sau 2 lần thử.'
+      : `Discord Voice không sẵn sàng: ${lastError?.message || 'timeout'}`
+  );
+}
+
 async function ensureVoiceSession(
   guild: Guild,
   voiceChannel: VoiceBasedChannel
@@ -879,20 +930,13 @@ async function ensureVoiceSession(
     }
   }
 
-  const connection = joinVoiceChannel({
-    channelId: voiceChannel.id,
-    guildId: guild.id,
-    adapterCreator: guild.voiceAdapterCreator as any,
-    selfDeaf: true,
-    selfMute: false
-  });
-  attachVoiceConnectionErrorHandler(guild, connection);
-
   const player = session?.player || createAudioPlayer({
     behaviors: {
       noSubscriber: NoSubscriberBehavior.Play
     }
   });
+
+  const connection = await createReadyVoiceConnection(guild, voiceChannel, player);
 
   if (!session) {
     session = {
@@ -953,23 +997,6 @@ async function ensureVoiceSession(
     session.channelId = voiceChannel.id;
     session.channelName = voiceChannel.name;
     attachVoiceConnectionErrorHandler(guild, connection);
-  }
-
-  connection.subscribe(session.player);
-
-  try {
-    await entersState(connection, VoiceConnectionStatus.Ready, 12_000);
-  } catch (err: any) {
-    guildVoiceSessions.delete(guild.id);
-    try {
-      if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
-    } catch {}
-
-    throw new Error(
-      isVoiceIpDiscoveryError(err)
-        ? 'Discord Voice không thể hoàn tất UDP/IP discovery trên Render. Render/Discord Voice không thiết lập được UDP handshake.'
-        : `Discord Voice không sẵn sàng: ${err?.message || 'timeout'}`
-    );
   }
 
   return session;
