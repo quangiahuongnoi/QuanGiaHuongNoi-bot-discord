@@ -107,44 +107,86 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
     customQuery?: string
   ) => {
     setIsControllingVoice(true);
+
+    const endpoint = `${window.location.origin}/api/bot/voice-control`;
+    let lastError: Error | null = null;
+
     try {
-      const res = await fetch('/api/bot/voice-control', {
-        method: 'POST',
-        credentials: 'same-origin',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          guildId: guild.id,
-          voiceChannelId: selectedVoiceChannelId || undefined,
-          action,
-          query: customQuery || currentTrack?.title || 'Chìm Sâu RPT MCK'
-        })
-      });
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const controller = new AbortController();
+          const timeout = window.setTimeout(() => controller.abort(), 12000);
 
-      const raw = await res.text();
-      let data: any = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        throw new Error(
-          res.status === 401
-            ? 'Phiên đăng nhập Admin đã hết hạn. Hãy đăng nhập lại.'
-            : res.status >= 500
-              ? 'Máy chủ Admin đang khởi động lại hoặc gặp lỗi. Vui lòng thử lại sau vài giây.'
-              : 'API Voice trả về dữ liệu không hợp lệ.'
-        );
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            credentials: 'include',
+            cache: 'no-store',
+            signal: controller.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              'Cache-Control': 'no-cache'
+            },
+            body: JSON.stringify({
+              guildId: guild.id,
+              voiceChannelId: selectedVoiceChannelId || undefined,
+              action,
+              query: customQuery || currentTrack?.title || 'Chìm Sâu RPT MCK'
+            })
+          });
+
+          window.clearTimeout(timeout);
+
+          const raw = await res.text();
+          let data: any = {};
+          try {
+            data = raw ? JSON.parse(raw) : {};
+          } catch {
+            throw new Error(
+              res.status === 401
+                ? 'Phiên đăng nhập Admin đã hết hạn. Hãy đăng nhập lại.'
+                : res.status >= 500
+                  ? `Máy chủ Admin trả HTTP ${res.status}. Hãy thử lại.`
+                  : `API Voice trả dữ liệu không hợp lệ (HTTP ${res.status}).`
+            );
+          }
+
+          if (res.ok && data.ok) {
+            if (data.channelName) setActiveLiveVoiceName(data.channelName);
+            if (action === 'leave') setActiveLiveVoiceName(null);
+            setLiveVoiceNotice(data.message || 'Đã thực hiện lệnh Voice.');
+            window.setTimeout(() => setLiveVoiceNotice(null), 4500);
+            return data;
+          }
+
+          const backendMessage =
+            data?.error ||
+            data?.message ||
+            `Voice API từ chối yêu cầu (HTTP ${res.status}).`;
+
+          // 502/503/504 are transient Render/proxy failures; retry once.
+          if ((res.status === 502 || res.status === 503 || res.status === 504) && attempt === 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1200));
+            continue;
+          }
+
+          setLiveVoiceNotice(backendMessage);
+          window.setTimeout(() => setLiveVoiceNotice(null), 4500);
+          return null;
+        } catch (err: any) {
+          lastError = err instanceof Error ? err : new Error(String(err || 'Unknown Voice request error'));
+          if (attempt === 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1200));
+            continue;
+          }
+        }
       }
 
-      if (res.ok && data.ok) {
-        if (data.channelName) setActiveLiveVoiceName(data.channelName);
-        if (action === 'leave') setActiveLiveVoiceName(null);
-        setLiveVoiceNotice(data.message);
-      } else {
-        setLiveVoiceNotice(data.error || 'Hãy gõ !play hoặc !join trực tiếp trong Discord.');
-      }
-      setTimeout(() => setLiveVoiceNotice(null), 4500);
-    } catch (err: any) {
-      setLiveVoiceNotice(err?.message || 'Không thể gửi lệnh điều khiển Voice lúc này.');
+      const detail = lastError?.name === 'AbortError'
+        ? 'Voice API phản hồi quá chậm (timeout 12 giây).'
+        : lastError?.message || 'Không thể kết nối Voice API.';
+      setLiveVoiceNotice(`Không thể gửi lệnh Voice: ${detail} [${endpoint}]`);
+      window.setTimeout(() => setLiveVoiceNotice(null), 6000);
       return null;
     } finally {
       setIsControllingVoice(false);
