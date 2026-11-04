@@ -719,6 +719,17 @@ async function playTrackInSession(session: GuildVoiceSession, track: ResolvedPla
 
 const voiceConnectionsWithHandlers = new WeakSet<VoiceConnection>();
 
+// @discordjs/voice can surface a late IP-discovery rejection after a UDP socket
+// closes. Keep this very narrowly scoped so unrelated promise bugs still crash
+// normally and the Discord bot process survives a recoverable Voice network flap.
+process.on('unhandledRejection', (reason) => {
+  if (isVoiceIpDiscoveryError(reason)) {
+    console.warn('[Discord Voice Unhandled Rejection] IP discovery socket closed; keeping the bot process alive.');
+    return;
+  }
+  console.error('[Unhandled Promise Rejection]', reason);
+});
+
 function isVoiceIpDiscoveryError(error: unknown): boolean {
   const message = String((error as any)?.message || error || '');
   return /Cannot perform IP discovery - socket closed/i.test(message);
