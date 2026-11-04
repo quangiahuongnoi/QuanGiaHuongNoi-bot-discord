@@ -55,6 +55,7 @@ import { LoginView } from './components/LoginView';
 import { AlertTriangle, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export default function App() {
+  const APP_START_TIME = React.useMemo(() => Date.now(), []);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const [adminUsername, setAdminUsername] = useState('admin');
@@ -440,7 +441,9 @@ export default function App() {
         details: `${action === 'TIMEOUT' ? 'Timeout' : action === 'KICK' ? 'Kick' : 'Ban'}: ${reason}`,
         severity: 'danger'
       });
-    } catch {}
+    } catch {
+      return false;
+    }
     return true;
   };
 
@@ -462,7 +465,7 @@ export default function App() {
       serverName: activeGuild.name,
       memberCount: activeGuild.memberCount,
       onlineCount: activeGuild.onlineCount,
-      uptimeSeconds: 86420,
+      uptimeSeconds: Math.floor((Date.now() - APP_START_TIME) / 1000),
       currentTrackTitle: tracks[currentTrackIndex]?.title,
       queueCount: tracks.length,
       youtubeCount: youtubeFeeds.length,
