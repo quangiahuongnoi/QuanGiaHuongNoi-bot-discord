@@ -2125,11 +2125,23 @@ async function startServer() {
 
       if (action === 'play') {
         const track = await resolveAudioStreamForQuery(query || 'Chìm Sâu RPT MCK', 'Web/App Admin');
-        playTrackInSession(session, track);
+        if (session.currentTrack) {
+          session.queue.push(track);
+          return res.json({
+            ok: true,
+            message: `Đã thêm "${track.title}" vào hàng đợi phòng 🔊 ${targetVoice.name}.`,
+            track,
+            queued: true,
+            queueLength: session.queue.length,
+            channelName: targetVoice.name
+          });
+        }
+        await playTrackInSession(session, track);
         return res.json({
           ok: true,
           message: `Đang phát "${track.title}" trực tiếp trong phòng 🔊 ${targetVoice.name}!`,
           track,
+          queued: false,
           channelName: targetVoice.name
         });
       }
