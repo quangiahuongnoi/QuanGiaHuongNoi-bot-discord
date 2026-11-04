@@ -601,7 +601,6 @@ async function resolveYouTubeAudioWithYtDlp(videoUrl: string): Promise<string | 
       console.warn('[yt-dlp Audio Lookup Notice]:', stderr.slice(-2500));
     }
     return streamUrl || null;
-  } finally {
   } catch (err: any) {
     const detail = [err?.message, err?.stderr].filter(Boolean).join(' | ');
     console.warn('[yt-dlp Audio Lookup Notice]:', detail || 'Unable to resolve YouTube audio');
