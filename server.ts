@@ -19,7 +19,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  Events
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -500,7 +501,7 @@ async function startDiscordBotIfConfigured() {
       partials: [Partials.Message, Partials.Channel]
     });
 
-    client.once('ready', async (readyClient) => {
+    client.once(Events.ClientReady, async (readyClient) => {
       botConnectionStatus = 'connected';
       console.log(`✅ Live Discord Bot connected 24/7 as ${readyClient.user.tag}`);
       appendLog({
@@ -1374,6 +1375,17 @@ async function startDiscordBotIfConfigured() {
     client.on('error', (err) => {
       botConnectionStatus = 'error';
       botConnectionError = err.message;
+    });
+    client.on('shardError', (err) => {
+      botConnectionStatus = 'error';
+      botConnectionError = err.message;
+    });
+    client.on('shardDisconnect', () => {
+      botConnectionStatus = 'disconnected';
+    });
+    client.on('shardReady', () => {
+      botConnectionStatus = 'connected';
+      botConnectionError = null;
     });
 
     await client.login(token);
