@@ -1593,13 +1593,60 @@ async function getYouTubeLive(feed: YouTubeFeed) {
   };
 }
 
+async function getLatestTikTokUpload(feed: TikTokFeed) {
+  const handle = normalizeTikTokHandle(feed.creatorHandle);
+  if (!handle) return null;
+  const profileUrl = `https://www.tiktok.com/${handle}`;
+  const html = await fetchPublicText(profileUrl);
+
+  const scriptMatch = html.match(/<script[^>]+id=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (scriptMatch?.[1]) {
+    try {
+      const data = JSON.parse(scriptMatch[1]);
+      const queue: any[] = [data];
+      const seen = new Set<any>();
+      while (queue.length && seen.size < 50000) {
+        const current = queue.shift();
+        if (!current || typeof current !== 'object' || seen.has(current)) continue;
+        seen.add(current);
+        if (current.itemStruct?.id) {
+          const id = String(current.itemStruct.id);
+          return {
+            title: current.itemStruct.desc || current.itemStruct.shareMeta?.desc || `Video mới của ${feed.creatorName || handle}`,
+            url: `https://www.tiktok.com/${handle}/video/${id}`
+          };
+        }
+        if (current.video?.id) {
+          const id = String(current.video.id);
+          return {
+            title: current.desc || current.title || `Video mới của ${feed.creatorName || handle}`,
+            url: `https://www.tiktok.com/${handle}/video/${id}`
+          };
+        }
+        for (const value of Object.values(current)) {
+          if (value && typeof value === 'object') queue.push(value);
+        }
+      }
+    } catch {
+      // Fall back to regex extraction.
+    }
+  }
+
+  const id = html.match(/"(?:itemId|videoId)"\s*:\s*"?(\d{10,})"?/i)?.[1] || '';
+  if (!id) return null;
+  const desc = html.match(/"desc"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i)?.[1] || `Video mới của ${feed.creatorName || handle}`;
+  return {
+    title: decodeHtmlEntities(desc.replace(/\"/g, '"')),
+    url: `https://www.tiktok.com/${handle}/video/${id}`
+  };
+}
+
 async function getTikTokLive(feed: TikTokFeed) {
   const handle = normalizeTikTokHandle(feed.creatorHandle);
   if (!handle) return { live: false };
   const liveUrl = `https://www.tiktok.com/${handle}/live`;
   const html = await fetchPublicText(liveUrl);
 
-  // TikTok's public live page exposes a room id while a creator is actually live.
   const roomId = html.match(/"(?:roomId|liveRoomId)"\s*:\s*"?(\d{5,})"?/i)?.[1] || '';
   const liveSignal = roomId || /"(?:isLive|isLiveNow|liveStatus)"\s*:\s*(?:true|1|2)/i.test(html);
   if (!liveSignal) return { live: false };
@@ -1608,7 +1655,7 @@ async function getTikTokLive(feed: TikTokFeed) {
   return {
     live: true,
     roomId,
-    title: decodeHtmlEntities(titleRaw.replace(/\\"/g, '"')),
+    title: decodeHtmlEntities(titleRaw.replace(/\"/g, '"')),
     url: liveUrl
   };
 }
@@ -1748,22 +1795,44 @@ async function checkTikTokFeed(feed: TikTokFeed, result: SocialMonitorCheckResul
   if (feed.status !== 'active') return;
   result.tiktok += 1;
   try {
-    const state = await getTikTokLive(feed);
-    const previous = feed.lastLiveStatus || 'offline';
+    const [latest, liveState] = await Promise.allSettled([
+      feed.notifyOnUpload ? getLatestTikTokUpload(feed) : Promise.resolve(null),
+      feed.notifyOnLive ? getTikTokLive(feed) : Promise.resolve({ live: false })
+    ]);
     const isPrimed = socialMonitorPrimed.has(`tt:${feed.id}`);
-    if (state.live && previous !== 'live' && isPrimed) {
-      await sendSocialAlert('tiktok', feed, {
-        type: 'live',
-        title: state.title || `${feed.creatorName} đang LIVE`,
-        url: state.url
-      });
-      result.alertsSent += 1;
+
+    if (latest.status === 'rejected') {
+      result.errors.push(`TikTok upload ${feed.creatorHandle}: ${latest.reason?.message || 'video check error'}`);
+    } else if (latest.value) {
+      const video = latest.value;
+      if (isPrimed && feed.notifyOnUpload && feed.lastVideoUrl !== video.url) {
+        await sendSocialAlert('tiktok', feed, { type: 'upload', title: video.title, url: video.url });
+        result.alertsSent += 1;
+      }
+      feed.lastVideoTitle = video.title;
+      feed.lastVideoUrl = video.url;
     }
-    feed.lastLiveStatus = state.live ? 'live' : 'offline';
+
+    if (liveState.status === 'rejected') {
+      result.errors.push(`TikTok Live ${feed.creatorHandle}: ${liveState.reason?.message || 'live check error'}`);
+    } else if (liveState.value) {
+      const previous = feed.lastLiveStatus || 'offline';
+      const live = liveState.value.live;
+      if (live && previous !== 'live' && isPrimed && feed.notifyOnLive) {
+        await sendSocialAlert('tiktok', feed, {
+          type: 'live',
+          title: ('title' in liveState.value && liveState.value.title) ? liveState.value.title : `${feed.creatorName} đang LIVE`,
+          url: ('url' in liveState.value && liveState.value.url) ? liveState.value.url : `https://www.tiktok.com/${normalizeTikTokHandle(feed.creatorHandle)}/live`
+        });
+        result.alertsSent += 1;
+      }
+      feed.lastLiveStatus = live ? 'live' : 'offline';
+    }
+
     feed.lastChecked = new Date().toLocaleString('vi-VN');
     socialMonitorPrimed.add(`tt:${feed.id}`);
   } catch (error: any) {
-    result.errors.push(`TikTok ${feed.creatorHandle}: ${error?.message || 'live check error'}`);
+    result.errors.push(`TikTok ${feed.creatorHandle}: ${error?.message || 'social check error'}`);
   }
 }
 
