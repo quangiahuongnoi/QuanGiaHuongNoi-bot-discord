@@ -723,6 +723,38 @@ async function ensureVoiceSession(
 ): Promise<GuildVoiceSession> {
   let session = guildVoiceSessions.get(guild.id);
 
+  // Reuse a healthy existing connection. Creating a second VoiceConnection for
+  // the same guild can race Discord's voice state and make dashboard controls
+  // appear to fail even though the bot is already connected.
+  if (session) {
+    const currentChannel = guild.channels.cache.get(session.channelId);
+    if (currentChannel?.isVoiceBased() && session.connection.state.status !== VoiceConnectionStatus.Destroyed) {
+      if (session.channelId !== voiceChannel.id) {
+        const oldConnection = session.connection;
+        const connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId: guild.id,
+          adapterCreator: guild.voiceAdapterCreator as any,
+          selfDeaf: true,
+          selfMute: false
+        });
+        session.connection = connection;
+        session.channelId = voiceChannel.id;
+        session.channelName = voiceChannel.name;
+        try { oldConnection.destroy(); } catch {}
+        connection.subscribe(session.player);
+        try {
+          await entersState(connection, VoiceConnectionStatus.Ready, 8_000);
+        } catch (err: any) {
+          console.warn(`[Voice Move Notice in ${guild.name}]:`, err?.message || 'Voice connection is still connecting');
+        }
+      } else {
+        session.connection.subscribe(session.player);
+      }
+      return session;
+    }
+  }
+
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
     guildId: guild.id,
