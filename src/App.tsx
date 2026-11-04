@@ -54,6 +54,15 @@ import { BotCodeExportModal } from './components/BotCodeExportModal';
 import { LoginView } from './components/LoginView';
 import { AlertTriangle, ArrowRight, ShieldCheck } from 'lucide-react';
 
+function parseDurationToSeconds(value?: string) {
+  if (!value) return 180;
+  const parts = value.split(':').map(Number);
+  if (parts.some(Number.isNaN)) return 180;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return 180;
+}
+
 export default function App() {
   const APP_START_TIME = React.useMemo(() => Date.now(), []);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -167,7 +176,8 @@ export default function App() {
     setAuditLogs(prev => [entry, ...prev]);
   };
 
-  // Sync settings directly down to backend live Discord bot
+  // Sync only the fields that changed. Sending the whole local state here can
+  // race with React state updates and overwrite newer server values.
   const syncConfigToBackend = async (
     customCommands?: DiscordCommandDef[],
     customResponses?: AutoResponseRule[],
@@ -179,24 +189,27 @@ export default function App() {
     customJoinRoleEnabled?: boolean,
     customReactionRoles?: ReactionRoleGroup[]
   ) => {
+    const payload: Record<string, unknown> = {};
+    if (customCommands !== undefined) payload.commands = customCommands;
+    if (customResponses !== undefined) payload.autoResponses = customResponses;
+    if (customAutoMod !== undefined) payload.autoModConfig = customAutoMod;
+    if (customModules !== undefined) payload.modulesEnabled = customModules;
+    if (customLevelRoles !== undefined) payload.levelRoles = customLevelRoles;
+    if (customYT !== undefined) payload.youtubeFeeds = customYT;
+    if (customTT !== undefined) payload.tiktokFeeds = customTT;
+    if (customJoinRoleEnabled !== undefined) payload.joinRoleEnabled = customJoinRoleEnabled;
+    if (customReactionRoles !== undefined) payload.reactionRoles = customReactionRoles;
+    if (Object.keys(payload).length === 0) return;
+
     try {
-      await fetch('/api/bot/sync-config', {
+      const res = await fetch('/api/bot/sync-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          commands: customCommands || commands,
-          autoResponses: customResponses || autoResponses,
-          autoModConfig: customAutoMod || autoModConfig,
-          joinRoleEnabled: typeof customJoinRoleEnabled === 'boolean' ? customJoinRoleEnabled : joinRoleEnabled,
-          modulesEnabled: customModules || modulesEnabled,
-          levelRoles: customLevelRoles || levelRoles,
-          reactionRoles: customReactionRoles || reactionRoleGroups,
-          youtubeFeeds: customYT || youtubeFeeds,
-          tiktokFeeds: customTT || tiktokFeeds
-        })
+        body: JSON.stringify(payload)
       });
+      if (res.status === 401) setIsAuthenticated(false);
     } catch {
-      // Backend not running yet
+      // Backend temporarily unavailable.
     }
   };
 
@@ -322,8 +335,24 @@ export default function App() {
         return;
       }
       const idx = tracks.findIndex(track => track.url === data.track.videoUrl || track.title === data.track.title);
-      if (idx >= 0) setCurrentTrackIndex(idx);
-      setIsPlaying(true);
+      if (idx >= 0) {
+        setCurrentTrackIndex(idx);
+      } else {
+        const resolved: Track = {
+          id: `discord-${Date.now()}`,
+          title: data.track.title || 'Bài hát đang phát',
+          artist: data.track.author || 'Discord',
+          durationSeconds: parseDurationToSeconds(data.track.durationText),
+          url: data.track.videoUrl || '',
+          thumbnailUrl: data.track.thumbnail || '',
+          requestedBy: data.track.requestedBy || 'Discord',
+          genre: 'Discord Voice',
+          lyrics: []
+        };
+        setTracks(prev => [resolved, ...prev]);
+        setCurrentTrackIndex(0);
+      }
+      setIsPlaying(!Boolean(data.message && data.message.includes('bỏ qua bài hát hiện tại')));
     } catch {
       setIsPlaying(false);
     }
