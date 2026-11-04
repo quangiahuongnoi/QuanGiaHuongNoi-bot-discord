@@ -2138,7 +2138,97 @@ async function startServer() {
     });
   });
 
-  // 3b. Real-time XP Leaderboard
+  // 3b. Runtime Analytics
+  app.get('/api/bot/analytics', (req, res) => {
+    const guildId = String(req.query.guildId || '');
+    const guild = guildId && discordClient?.isReady()
+      ? discordClient.guilds.cache.get(guildId)
+      : discordClient?.guilds.cache.first();
+    const now = Date.now();
+    const dayMap = new Map<string, { joins: number; leaves: number }>();
+    for (const ts of memberJoinEvents) {
+      const key = new Date(ts).toLocaleDateString('vi-VN');
+      const bucket = dayMap.get(key) || { joins: 0, leaves: 0 };
+      bucket.joins += 1;
+      dayMap.set(key, bucket);
+    }
+    const memberGrowth = Array.from({ length: 30 }, (_, idx) => {
+      const d = new Date(now - (29 - idx) * 86400000);
+      const key = d.toLocaleDateString('vi-VN');
+      const bucket = dayMap.get(key) || { joins: 0, leaves: 0 };
+      return { date: key, total: guild?.memberCount || 0, joins: bucket.joins, leaves: bucket.leaves };
+    });
+    const totalMessages = Math.max(1, Array.from(channelMessageCounts.values()).reduce((sum, n) => sum + n, 0));
+    const topChannels = Array.from(channelMessageCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name, messageCount]) => ({
+        name: `#${name}`,
+        messageCount,
+        percentage: Math.round((messageCount / totalMessages) * 1000) / 10
+      }));
+    const topMembers = Array.from(userXPStore.values())
+      .filter((entry) => !guildId || entry.guildId === guildId)
+      .sort((a, b) => b.xp - a.xp)
+      .slice(0, 10)
+      .map((entry) => ({
+        id: entry.userId,
+        name: entry.displayName || entry.username,
+        avatar: entry.avatar,
+        messages: entry.messages,
+        xp: entry.xp
+      }));
+    res.json({
+      ok: true,
+      source: 'runtime',
+      analytics: {
+        memberGrowth,
+        hourlyActivity: messageHourlyCounts.map((messages, hour) => ({
+          hour,
+          messages,
+          voiceMinutes: Math.round(voiceHourlyMinutes[hour] * 10) / 10
+        })),
+        topMembers,
+        topChannels,
+        modSummary: { ...moderationStats }
+      }
+    });
+  });
+
+  // 3c. Clear runtime audit logs
+  app.delete('/api/bot/logs', (req, res) => {
+    liveAuditLogs = [];
+    res.json({ ok: true, message: 'Đã xóa nhật ký runtime.' });
+  });
+
+  // 3d. Real member warning
+  app.post('/api/bot/warn-member', async (req, res) => {
+    const { guildId, memberId, reason } = req.body || {};
+    if (!discordClient || !discordClient.isReady()) {
+      return res.status(400).json({ ok: false, error: 'Bot chưa kết nối Discord.' });
+    }
+    try {
+      const targetGuild = guildId ? discordClient.guilds.cache.get(guildId) : discordClient.guilds.cache.first();
+      if (!targetGuild) return res.status(404).json({ ok: false, error: 'Không tìm thấy server.' });
+      const member = await targetGuild.members.fetch(memberId);
+      if (!member) return res.status(404).json({ ok: false, error: 'Không tìm thấy thành viên.' });
+      const key = `${targetGuild.id}:${member.id}`;
+      const warnings = (userWarningStore.get(key) || 0) + 1;
+      userWarningStore.set(key, warnings);
+      appendLog({
+        actionType: 'MEMBER_WARN',
+        executor: { name: 'Web Admin', isBot: false },
+        target: { name: member.displayName, id: member.id },
+        details: `Cảnh cáo lần ${warnings}: ${reason || 'Vi phạm nội quy máy chủ'}`,
+        severity: 'warning'
+      });
+      return res.json({ ok: true, warnings, message: `Đã cảnh cáo ${member.displayName}. Tổng cảnh cáo: ${warnings}.` });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Không thể cảnh cáo thành viên.' });
+    }
+  });
+
+  // 3e. Real-time XP Leaderboard
   app.get('/api/bot/leaderboard', (req, res) => {
     const guildId = req.query.guildId as string;
     let list = Array.from(userXPStore.values());
@@ -2332,7 +2422,16 @@ async function startServer() {
         await member.ban({ reason: reason || 'Bị ban từ Web Dashboard' });
       } else if (action === 'TIMEOUT') {
         await member.timeout((durationMinutes || 60) * 60 * 1000, reason || 'Bị timeout từ Web Dashboard');
+      } else {
+        return res.status(400).json({ ok: false, error: 'Hành động moderation không hợp lệ.' });
       }
+      appendLog({
+        actionType: action === 'KICK' ? 'MEMBER_KICK' : action === 'BAN' ? 'MEMBER_BAN' : 'MEMBER_TIMEOUT',
+        executor: { name: 'Web Admin', isBot: false },
+        target: { name: member.displayName, id: member.id },
+        details: reason || 'Moderation từ Web Dashboard',
+        severity: 'danger'
+      });
       return res.json({ ok: true, message: `Thực hiện ${action} thành công đối với ${member.displayName}.` });
     } catch (err: any) {
       return res.status(500).json({ ok: false, error: err?.message || 'Lỗi khi thực thi quản lý thành viên.' });
