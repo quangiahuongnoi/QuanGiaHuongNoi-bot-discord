@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     ca-certificates \
-  && python3 -m pip install --no-cache-dir --break-system-packages -U yt-dlp \
+  && python3 -m pip install --no-cache-dir --break-system-packages -U "yt-dlp[default]" bgutil-ytdlp-pot-provider yt-dlp-ejs \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
