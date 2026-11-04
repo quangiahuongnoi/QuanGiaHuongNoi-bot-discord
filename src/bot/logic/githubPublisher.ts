@@ -40,7 +40,6 @@ const IGNORED_FILES = new Set([
   '.env.production',
   '.DS_Store',
   'bun.lock',
-  'package-lock.json'
 ]);
 
 export function shouldIncludeFileInGitHubPush(relativePath: string): boolean {
