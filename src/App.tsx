@@ -317,13 +317,12 @@ export default function App() {
   const handleNextTrack = async () => {
     try {
       const data = await controlVoiceFromDashboard('skip');
-      if (data.track) {
-        const idx = tracks.findIndex(track => track.url === data.track.videoUrl || track.title === data.track.title);
-        if (idx >= 0) setCurrentTrackIndex(idx);
-      } else {
-        const idx = getNextTrackIndex(currentTrackIndex, tracks.length, loopMode);
-        if (idx !== -1) setCurrentTrackIndex(idx);
+      if (!data.track) {
+        setIsPlaying(false);
+        return;
       }
+      const idx = tracks.findIndex(track => track.url === data.track.videoUrl || track.title === data.track.title);
+      if (idx >= 0) setCurrentTrackIndex(idx);
       setIsPlaying(true);
     } catch {
       setIsPlaying(false);
