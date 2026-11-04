@@ -63,6 +63,7 @@ export default function App() {
   const [activeGuild, setActiveGuild] = useState<GuildInfo>(INITIAL_GUILDS[0]);
   const [botStatus, setBotStatus] = useState<'online' | 'idle' | 'dnd'>('idle');
   const [botInfo, setBotInfo] = useState<{ tag: string; ping: number; avatar: string } | null>(null);
+  const [discordClientId, setDiscordClientId] = useState('');
 
   const [modulesEnabled, setModulesEnabled] = useState({
     autoResponder: true,
@@ -207,6 +208,7 @@ export default function App() {
         }
         if (res.ok) {
           const data = await res.json();
+          setDiscordClientId(data.clientIdConfigured || '');
           if (data.status === 'connected') {
             setBotStatus('online');
             if (data.botUser) {
@@ -563,6 +565,7 @@ export default function App() {
                 onToggleModule={handleToggleModule}
                 onNavigateTab={(tab) => setCurrentTab(tab)}
                 onOpenExport={() => setCurrentTab('bot-deploy')}
+                discordClientId={discordClientId}
               />
             )}
 

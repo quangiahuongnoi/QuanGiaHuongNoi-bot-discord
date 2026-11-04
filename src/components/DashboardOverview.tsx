@@ -28,6 +28,7 @@ interface DashboardOverviewProps {
   onToggleModule: (moduleKey: keyof DashboardOverviewProps['modulesEnabled']) => void;
   onNavigateTab: (tab: TabType) => void;
   onOpenExport: () => void;
+  discordClientId?: string;
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
@@ -35,10 +36,10 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   modulesEnabled,
   onToggleModule,
   onNavigateTab,
-  onOpenExport
+  onOpenExport,
+  discordClientId = ''
 }) => {
   const [copiedLink, setCopiedLink] = React.useState(false);
-  const [copiedToken, setCopiedToken] = React.useState(false);
   const [selectedPerms, setSelectedPerms] = React.useState<string[]>([
     'ADMINISTRATOR',
     'MANAGE_ROLES',
@@ -50,17 +51,15 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     'SPEAK'
   ]);
 
-  const botInviteUrl = `https://discord.com/api/oauth2/authorize?client_id=123456789012345678&permissions=8&scope=bot%20applications.commands`;
+  const botInviteUrl = discordClientId
+    ? `https://discord.com/api/oauth2/authorize?client_id=${encodeURIComponent(discordClientId)}&permissions=8&scope=bot%20applications.commands`
+    : '';
 
-  const copyToClipboard = (text: string, type: 'link' | 'token') => {
+  const copyToClipboard = (text: string) => {
+    if (!text) return;
     navigator.clipboard.writeText(text);
-    if (type === 'link') {
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2000);
-    } else {
-      setCopiedToken(true);
-      setTimeout(() => setCopiedToken(false), 2000);
-    }
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
   };
 
   const moduleCards = [
@@ -328,12 +327,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               <input
                 type="text"
                 readOnly
-                value={botInviteUrl}
+                value={botInviteUrl || 'Chưa cấu hình DISCORD_CLIENT_ID'}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-300 select-all"
               />
               <button
                 type="button"
-                onClick={() => copyToClipboard(botInviteUrl, 'link')}
+                onClick={() => copyToClipboard(botInviteUrl)}
                 className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors"
               >
                 {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
@@ -344,23 +343,10 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1.5">
-              Discord Bot Token (Ẩn an toàn)
+              Discord Bot Token
             </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="password"
-                readOnly
-                value="MTE5MjM4NDAxMjM0NTY3ODkwMQ.G4kF9x.abcdef1234567890abcdef"
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-400 select-all"
-              />
-              <button
-                type="button"
-                onClick={() => copyToClipboard('MTE5MjM4NDAxMjM0NTY3ODkwMQ.G4kF9x.abcdef1234567890abcdef', 'token')}
-                className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 shrink-0 transition-colors"
-              >
-                {copiedToken ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedToken ? 'Đã copy' : 'Copy'}</span>
-              </button>
+            <div className="rounded-lg bg-slate-950 border border-slate-800 px-3 py-2.5 text-xs text-slate-400">
+              Token được giữ trong <code className="text-indigo-300">.env</code> / Secrets và không hiển thị trong giao diện quản trị.
             </div>
           </div>
         </div>

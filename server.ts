@@ -1201,13 +1201,13 @@ async function startDiscordBotIfConfigured() {
           authorName: authorDisplay,
           serverName: message.guild.name,
           memberCount: message.guild.memberCount,
-          onlineCount: Math.max(1, Math.floor(message.guild.memberCount * 0.25)),
+          onlineCount: message.guild.members.cache.filter((m) => m.presence?.status && m.presence.status !== 'offline').size,
           uptimeSeconds,
           voiceChannelName: activeSession?.channelName,
           currentTrackTitle: activeSession?.currentTrack?.title,
           queueCount: activeSession?.queue.length || 0,
-          youtubeCount: 2,
-          tiktokCount: 2
+          youtubeCount: liveSocialFeeds.youtube.length,
+          tiktokCount: liveSocialFeeds.tiktok.length
         });
 
         if (cmdOutput.handled) {

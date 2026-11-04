@@ -60,6 +60,16 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
   const roles = guild.roles || [];
   const defaultChannelId = textChannels[0]?.id || '';
 
+  const getChannelLabel = (channelId: string) => {
+    const channel = guild.channels.find((item) => item.id === channelId);
+    return channel ? `#${channel.name}` : channelId ? `Kênh ID ${channelId}` : 'Chưa chọn kênh Discord';
+  };
+
+  const getRoleLabel = (roleId?: string) => {
+    const role = roleId ? roles.find((item) => item.id === roleId) : undefined;
+    return role ? `@${role.name}` : roleId ? `Role ID ${roleId}` : 'Không ping role';
+  };
+
   const handleCreateFeed = (e: React.FormEvent) => {
     e.preventDefault();
     if (activePlatform === 'youtube') {
@@ -69,12 +79,12 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
         channelName: ytName.trim(),
         channelUrl: ytUrl.trim() || `https://youtube.com/@${encodeURIComponent(ytName)}`,
         channelId: '',
-        avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100&auto=format&fit=crop&q=80',
+        avatar: '',
         discordChannelId: ytChannelId || defaultChannelId,
         pingRoleId: ytPingRole || undefined,
         customMessage: ytTemplate,
-        lastVideoTitle: `Video mới nhất từ ${ytName}`,
-        lastVideoUrl: `https://youtube.com/watch?v=new_upload_${Date.now()}`,
+        lastVideoTitle: 'Chưa có dữ liệu mới',
+        lastVideoUrl: ytUrl.trim() || `https://www.youtube.com/@${encodeURIComponent(ytName)}`, 
         lastChecked: 'Vừa thêm',
         notifyOnLive: true,
         notifyOnUpload: true,
@@ -87,13 +97,13 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
         id: `tt-${Date.now()}`,
         creatorHandle: ttHandle.trim(),
         creatorName: ttName.trim() || ttHandle.trim(),
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+        avatar: '',
         discordChannelId: ttChannelId || defaultChannelId,
         pingRoleId: ttPingRole || undefined,
         customMessage: ttTemplate,
         lastLiveStatus: 'offline',
-        lastVideoTitle: `Clip ngắn xu hướng từ ${ttHandle}`,
-        lastVideoUrl: `https://tiktok.com/${ttHandle}/video/new`,
+        lastVideoTitle: 'Chưa có dữ liệu mới',
+        lastVideoUrl: `https://www.tiktok.com/${ttHandle.startsWith('@') ? ttHandle : `@${ttHandle}`}`, 
         lastChecked: 'Vừa thêm',
         status: 'active'
       };
@@ -252,9 +262,9 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                      <span>Kênh đích: <strong className="text-indigo-400">#thông-báo-live-video</strong></span>
+                      <span>Kênh đích: <strong className="text-indigo-400">{getChannelLabel(feed.discordChannelId)}</strong></span>
                       <span>·</span>
-                      <span className="text-slate-400">Ping: <strong>@Nhận Tin YouTube</strong></span>
+                      <span className="text-slate-400">Ping: <strong>{getRoleLabel(feed.pingRoleId)}</strong></span>
                     </div>
                   </div>
                 </div>
@@ -331,7 +341,9 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                     <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
                       <span className="font-mono text-cyan-300">{feed.creatorHandle}</span>
                       <span>·</span>
-                      <span>Kênh đích: <strong className="text-indigo-400">#thông-báo-live-video</strong></span>
+                      <span>Ping: <strong>{getRoleLabel(feed.pingRoleId)}</strong></span>
+                      <span>·</span>
+                      <span>Kênh đích: <strong className="text-indigo-400">{getChannelLabel(feed.discordChannelId)}</strong></span>
                     </div>
                   </div>
                 </div>
@@ -427,7 +439,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                       required
                       value={ytName}
                       onChange={(e) => setYtName(e.target.value)}
-                      placeholder="Ví dụ: Độ Mixi, F8 Official, Khoai Lang Thang..."
+                      placeholder="Kênh YouTube của bạn"
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
                     />
                   </div>
@@ -470,7 +482,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                       required
                       value={ttHandle}
                       onChange={(e) => setTtHandle(e.target.value)}
-                      placeholder="@schannelvn, @mixigaming..."
+                      placeholder="@quangiahuongnoi"
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white font-mono"
                     />
                   </div>
@@ -482,7 +494,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                       type="text"
                       value={ttName}
                       onChange={(e) => setTtName(e.target.value)}
-                      placeholder="Schannel Official"
+                      placeholder="Tên kênh TikTok của bạn"
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
                     />
                   </div>
