@@ -119,6 +119,8 @@ export const INITIAL_TIKTOK_FEEDS: TikTokFeed[] = [
     discordChannelId: '',
     pingRoleId: undefined,
     customMessage: '📱 **{creator_name} đang LIVE / có clip mới!**\n{video_title}\nXem ngay: {url}',
+    notifyOnLive: true,
+    notifyOnUpload: true,
     lastLiveStatus: 'offline',
     lastVideoTitle: 'Chưa có dữ liệu mới',
     lastVideoUrl: 'https://www.tiktok.com/@quangiahuongnoi',
