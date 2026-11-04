@@ -916,7 +916,7 @@ async function startDiscordBotIfConfigured() {
             .setFooter({ text: 'AegisBot Live Security Shield' });
           if ('send' in message.channel) await message.channel.send({ embeds: [warnEmbed] }).catch(() => {});
           appendLog({
-            actionType: actionTaken === 'MUTE' ? 'MEMBER_TIMEOUT' : actionTaken === 'KICK' ? 'MEMBER_KICK' : 'MEMBER_WARN',
+            actionType: actionTaken === 'MUTE' ? 'MEMBER_TIMEOUT' : actionTaken === 'KICK' ? 'MEMBER_KICK' : actionTaken === 'DELETE' ? 'MESSAGE_DELETE' : 'MEMBER_WARN',
             executor: { name: 'AegisBot [Auto-Mod]', isBot: true },
             target: { name: message.author.tag, id: message.author.id },
             details: actionLabel + ': ' + (modCheck.reason || 'Auto-Mod violation'),
@@ -2426,7 +2426,7 @@ async function startServer() {
         return res.json({ ok: true, message: 'Bot đã rời khỏi kênh Voice.' });
       }
 
-      if (action === 'pause' || action === 'skip' || action === 'previous' || action === 'prev' || action === 'volume' || action === 'loop' || action === 'shuffle' || action === 'filter') {
+      if (action === 'pause' || action === 'skip' || action === 'previous' || action === 'prev' || action === 'volume' || action === 'loop' || action === 'shuffle' || action === 'filter' || action === 'remove') {
         if (!existingSession) {
           return res.status(404).json({
             ok: false,
@@ -2519,6 +2519,23 @@ async function startServer() {
           if (existingSession.currentTrack) await playTrackInSession(existingSession, existingSession.currentTrack);
           return res.json({ ok: true, filterPreset: existingSession.filterPreset, message: 'Đã áp dụng Equalizer: ' + existingSession.filterPreset });
         }
+
+        if (action === 'remove') {
+          const queueIndex = Number(req.body.queueIndex);
+          if (!Number.isInteger(queueIndex) || queueIndex < 0 || queueIndex >= existingSession.queue.length) {
+            return res.status(400).json({ ok: false, error: 'Vị trí bài hát trong hàng đợi không hợp lệ.' });
+          }
+          const [removed] = existingSession.queue.splice(queueIndex, 1);
+          return res.json({
+            ok: true,
+            message: `Đã xóa "${removed?.title || 'bài hát'}" khỏi hàng đợi.`,
+            removed,
+            queue: existingSession.queue,
+            queueLength: existingSession.queue.length,
+            channelName: existingSession.channelName
+          });
+        }
+
         const vol = typeof req.body.volume === 'number'
           ? Math.max(0, Math.min(100, req.body.volume))
           : 80;
