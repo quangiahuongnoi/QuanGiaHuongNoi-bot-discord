@@ -6,7 +6,7 @@ Hệ thống **Discord Bot Full-Stack (Discord.js v14 + @discordjs/voice + React
 
 ## 🚀 Tính Năng Đã Hoàn Thiện & Sửa Lỗi
 
-1. **Loại bỏ 100% Mock & Giả lập**:
+1. **Loại bỏ 100% runtime thật & Giả lập**:
    - Đã gỡ bỏ toàn bộ module giả lập chat và âm thanh oscillator trình duyệt.
    - Toàn bộ hành động trên web đều gửi yêu cầu trực tiếp đến Discord Gateway và máy chủ Discord thật.
 
@@ -176,3 +176,10 @@ Nếu dependency của project báo xung đột `opusscript` / `prism-media`, c�
 ```bash
 npm install --legacy-peer-deps
 ```
+
+
+### Runtime hiện tại
+- Music: YouTube audio đầy đủ hoặc URL audio trực tiếp; không dùng preview ngắn hoặc stream radio khác làm fallback.
+- Social Monitor: YouTube/TikTok, có startup grace để tránh gửi lại LIVE khi Render restart.
+- Analytics/Warnings/Logs/XP: lưu runtime; PostgreSQL persistence sẽ hoạt động sau khi Render Blueprint inject `DATABASE_URL`.
+- Presence/Online count: Discord Bot cần bật Presence Intent trong Developer Portal.

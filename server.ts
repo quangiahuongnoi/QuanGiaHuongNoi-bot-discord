@@ -326,7 +326,7 @@ async function resolveAudioStreamForQuery(
       streamUrl: query,
       durationText: 'Live Stream',
       requestedBy,
-      sourceLabel: 'Direct Hi-Fi Audio'
+      sourceLabel: 'Direct audio đầy đủ Audio'
     };
   }
 
@@ -638,7 +638,7 @@ async function startDiscordBotIfConfigured() {
           },
           {
             name: 'play',
-            description: 'Phát nhạc Hi-Fi trong phòng Voice bạn đang ngồi',
+            description: 'Phát nhạc audio đầy đủ trong phòng Voice bạn đang ngồi',
             options: [
               {
                 name: 'query',
@@ -669,7 +669,7 @@ async function startDiscordBotIfConfigured() {
             description: 'Xem bảng xếp hạng thành viên năng nổ nhất máy chủ'
           }
         ]);
-        console.log('✅ Đã đăng ký Slash Commands (/) toàn cục');
+        console.log('✅ Đã đăng ký 8 Slash Commands hệ thống (/) toàn cục');
       } catch (err: any) {
         console.warn('[Slash Commands Registration Notice]:', err?.message);
       }
@@ -723,7 +723,7 @@ async function startDiscordBotIfConfigured() {
               .setColor(0x5865f2)
               .setTitle('🛡️ AegisBot — Trung Tâm Trợ Giúp Lệnh Discord')
               .setDescription(
-                '• `!play <tên/link>`: Tự động nhảy vào phòng Voice và phát nhạc Hi-Fi\n' +
+                '• `!play <tên/link>`: Tự động nhảy vào phòng Voice và phát nhạc audio đầy đủ\n' +
                 '• `!pause`, `!skip`, `!stop`, `!queue`, `!volume`: Điều khiển trình phát nhạc\n' +
                 '• `!rank`: Xem thẻ cấp độ kinh nghiệm (XP) cá nhân\n' +
                 '• `!leaderboard`: Xem bảng xếp hạng thành viên năng nổ nhất\n' +

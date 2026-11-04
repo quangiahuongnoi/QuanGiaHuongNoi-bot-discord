@@ -113,7 +113,7 @@ export const CommandsCenterView: React.FC<CommandsCenterViewProps> = ({
       });
       if (res.ok) {
         setSyncSuccessMsg(
-          `Đã đồng bộ ${commands.filter((c) => c.enabled).length} lệnh Prefix (!) & Slash Commands (/) lên máy chủ Discord!`
+          `Đã lưu ${commands.filter((c) => c.enabled).length} lệnh Prefix (!) vào cấu hình Bot. 8 Slash Commands hệ thống được đăng ký tự động khi Bot kết nối.`
         );
         setTimeout(() => setSyncSuccessMsg(null), 4000);
       }
@@ -185,7 +185,7 @@ export const CommandsCenterView: React.FC<CommandsCenterViewProps> = ({
             className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors whitespace-nowrap shrink-0"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSlash ? 'animate-spin' : ''}`} />
-            <span>Đồng Bộ Lệnh Lên Discord</span>
+            <span>Đồng Bộ Cấu Hình Lệnh</span>
           </button>
         </div>
       </div>

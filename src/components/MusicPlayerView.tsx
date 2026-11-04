@@ -442,7 +442,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
             </div>
           </div>
 
-          {/* Quick YouTube/Spotify Search Bar */}
+          {/* Quick YouTube / Direct Audio Search Bar */}
           <form onSubmit={handleSearchSubmit} className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
