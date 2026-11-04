@@ -728,6 +728,13 @@ export default function App() {
                     return updated;
                   });
                 }}
+                onUpdateYouTubeFeed={(feed) => {
+                  setYoutubeFeeds(prev => {
+                    const updated = prev.map(f => (f.id === feed.id ? feed : f));
+                    syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, updated, undefined);
+                    return updated;
+                  });
+                }}
                 onAddTikTokFeed={(feed) => {
                   setTiktokFeeds(prev => {
                     const updated = [...prev, feed];
@@ -754,6 +761,13 @@ export default function App() {
                 onToggleTikTokFeed={(id) => {
                   setTiktokFeeds(prev => {
                     const updated = prev.map(f => (f.id === id ? { ...f, status: f.status === 'active' ? 'paused' : 'active' } : f));
+                    syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, updated);
+                    return updated;
+                  });
+                }}
+                onUpdateTikTokFeed={(feed) => {
+                  setTiktokFeeds(prev => {
+                    const updated = prev.map(f => (f.id === feed.id ? feed : f));
                     syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, updated);
                     return updated;
                   });
