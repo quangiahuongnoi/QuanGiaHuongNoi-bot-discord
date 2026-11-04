@@ -320,6 +320,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
+            </div>
 
               {/* Last video status card */}
               <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 text-xs space-y-1">
@@ -408,6 +409,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
+            </div>
 
               {/* Live status badge */}
               <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800/80 text-xs space-y-1">
