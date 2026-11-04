@@ -58,6 +58,7 @@ export interface YouTubeFeed {
   lastChecked: string;
   notifyOnLive: boolean;
   notifyOnUpload: boolean;
+  lastLiveStatus?: 'offline' | 'live';
   status: 'active' | 'paused' | 'error';
 }
 

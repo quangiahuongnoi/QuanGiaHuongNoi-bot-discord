@@ -4,6 +4,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
+import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import {
@@ -1332,11 +1333,515 @@ async function startDiscordBotIfConfigured() {
   }
 }
 
+
+interface AdminSessionPayload {
+  username: string;
+  exp: number;
+  nonce: string;
+}
+
+const AUTH_COOKIE_NAME = 'qghn_admin_session';
+const AUTH_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const RUNTIME_SESSION_SECRET = randomBytes(32).toString('hex');
+
+function getAuthSecret(): string {
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (secret && secret.length >= 32) return secret;
+  // Safe per-process fallback for local development. Set SESSION_SECRET in production.
+  return RUNTIME_SESSION_SECRET;
+}
+
+function getAdminUsername(): string {
+  return (process.env.ADMIN_USERNAME || 'admin').trim();
+}
+
+function verifyAdminPassword(password: string): boolean {
+  const configured = process.env.ADMIN_PASSWORD || '';
+  return Boolean(configured) && password === configured;
+}
+
+function signSession(payload: AdminSessionPayload): string {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = createHmac('sha256', getAuthSecret()).update(encoded).digest('base64url');
+  return `${encoded}.${signature}`;
+}
+
+function verifySession(token: string | undefined): AdminSessionPayload | null {
+  if (!token) return null;
+  const [encoded, signature] = token.split('.');
+  if (!encoded || !signature) return null;
+
+  try {
+    const expected = createHmac('sha256', getAuthSecret()).update(encoded).digest('base64url');
+    const a = Buffer.from(signature);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as AdminSessionPayload;
+    if (payload.username !== getAdminUsername() || !payload.exp || payload.exp < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function parseCookies(cookieHeader = ''): Record<string, string> {
+  return cookieHeader.split(';').reduce<Record<string, string>>((cookies, part) => {
+    const index = part.indexOf('=');
+    if (index < 0) return cookies;
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (key) cookies[key] = decodeURIComponent(value);
+    return cookies;
+  }, {});
+}
+
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const cookies = parseCookies(req.headers.cookie || '');
+  const session = verifySession(cookies[AUTH_COOKIE_NAME]);
+  if (!session) {
+    return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Vui lòng đăng nhập Admin.' });
+  }
+  (req as any).adminSession = session;
+  next();
+}
+
+
+interface SocialMonitorCheckResult {
+  youtube: number;
+  tiktok: number;
+  alertsSent: number;
+  errors: string[];
+  checkedAt: string;
+}
+
+let socialMonitorTimer: NodeJS.Timeout | null = null;
+let socialMonitorRunning = false;
+const socialMonitorPrimed = new Set<string>();
+let lastSocialMonitorResult: SocialMonitorCheckResult = {
+  youtube: 0,
+  tiktok: 0,
+  alertsSent: 0,
+  errors: [],
+  checkedAt: ''
+};
+
+function socialMonitorEnabled() {
+  return String(process.env.SOCIAL_MONITOR_ENABLED || 'true').toLowerCase() !== 'false';
+}
+
+function socialMonitorIntervalMs() {
+  const parsed = Number(process.env.SOCIAL_MONITOR_INTERVAL_MS || 60000);
+  if (!Number.isFinite(parsed)) return 60000;
+  return Math.max(30000, Math.min(parsed, 15 * 60 * 1000));
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+async function fetchPublicText(url: string, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8'
+      }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function normalizeTikTokHandle(value: string) {
+  const cleaned = String(value || '').trim().replace(/^https?:\/\/www\.tiktok\.com\//i, '').replace(/^@+/, '').split(/[/?#]/)[0];
+  return cleaned ? `@${cleaned}` : '';
+}
+
+function normalizeYouTubeUrl(value: string, channelName = '') {
+  const raw = String(value || '').trim();
+  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/$/, '');
+  const handle = raw.replace(/^@+/, '') || channelName.trim().replace(/\s+/g, '');
+  return `https://www.youtube.com/@${encodeURIComponent(handle)}`;
+}
+
+function extractYouTubeChannelIdFromHtml(html: string) {
+  const patterns = [
+    /<meta[^>]+itemprop=["']channelId["'][^>]+content=["'](UC[a-zA-Z0-9_-]{20,})["']/i,
+    /"channelId":"(UC[a-zA-Z0-9_-]{20,})"/i,
+    /"externalId":"(UC[a-zA-Z0-9_-]{20,})"/i,
+    /channel\/((?:UC)[a-zA-Z0-9_-]{20,})/i
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return '';
+}
+
+async function resolveYouTubeChannelId(feed: YouTubeFeed) {
+  if (/^UC[a-zA-Z0-9_-]{20,}$/.test(feed.channelId || '')) return feed.channelId;
+  const url = normalizeYouTubeUrl(feed.channelUrl, feed.channelName);
+  const html = await fetchPublicText(url);
+  const channelId = extractYouTubeChannelIdFromHtml(html);
+  if (!channelId) throw new Error(`Không lấy được Channel ID của ${feed.channelName}. Hãy dùng URL /channel/UC...`);
+  feed.channelId = channelId;
+  return channelId;
+}
+
+function parseYouTubeRss(xml: string) {
+  const entryMatch = xml.match(/<entry>([\s\S]*?)<\/entry>/i);
+  if (!entryMatch) return null;
+  const entry = entryMatch[1];
+  const id = entry.match(/<yt:videoId>([^<]+)<\/yt:videoId>/i)?.[1]?.trim() || '';
+  const title = decodeHtmlEntities(entry.match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.trim() || 'Video mới trên YouTube');
+  const published = entry.match(/<published>([^<]+)<\/published>/i)?.[1]?.trim() || '';
+  const url = entry.match(/<link[^>]+rel=["']alternate["'][^>]+href=["']([^"']+)["']/i)?.[1]
+    || (id ? `https://www.youtube.com/watch?v=${id}` : '');
+  return id ? { id, title, url, published } : null;
+}
+
+async function getLatestYouTubeUpload(feed: YouTubeFeed) {
+  const channelId = await resolveYouTubeChannelId(feed);
+  const xml = await fetchPublicText(`https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(channelId)}`);
+  return parseYouTubeRss(xml);
+}
+
+async function getYouTubeLive(feed: YouTubeFeed) {
+  const apiKey = String(process.env.YOUTUBE_API_KEY || '').trim();
+  if (apiKey) {
+    const channelId = await resolveYouTubeChannelId(feed);
+    const apiUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+    apiUrl.searchParams.set('part', 'snippet');
+    apiUrl.searchParams.set('channelId', channelId);
+    apiUrl.searchParams.set('eventType', 'live');
+    apiUrl.searchParams.set('type', 'video');
+    apiUrl.searchParams.set('maxResults', '1');
+    apiUrl.searchParams.set('key', apiKey);
+    const response = await fetch(apiUrl);
+    if (!response.ok) throw new Error(`YouTube API HTTP ${response.status}`);
+    const data: any = await response.json();
+    const item = data?.items?.[0];
+    if (!item?.id?.videoId) return { live: false };
+    return {
+      live: true,
+      videoId: item.id.videoId,
+      title: item.snippet?.title || `Livestream của ${feed.channelName}`,
+      url: `https://www.youtube.com/watch?v=${item.id.videoId}`
+    };
+  }
+
+  const channelUrl = normalizeYouTubeUrl(feed.channelUrl, feed.channelName);
+  const liveHtml = await fetchPublicText(`${channelUrl}/live`);
+  const liveNow = /"isLiveNow"\s*:\s*true/i.test(liveHtml) || /"isLive"\s*:\s*true/i.test(liveHtml);
+  if (!liveNow) return { live: false };
+  const videoId = liveHtml.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{6,})"/i)?.[1] || '';
+  const titleRaw = liveHtml.match(/"title"\s*:\s*\{?"simpleText"\s*:\s*"([^"]+)"/i)?.[1] || `Livestream của ${feed.channelName}`;
+  return {
+    live: true,
+    videoId,
+    title: decodeHtmlEntities(titleRaw),
+    url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : `${channelUrl}/live`
+  };
+}
+
+async function getTikTokLive(feed: TikTokFeed) {
+  const handle = normalizeTikTokHandle(feed.creatorHandle);
+  if (!handle) return { live: false };
+  const liveUrl = `https://www.tiktok.com/${handle}/live`;
+  const html = await fetchPublicText(liveUrl);
+
+  // TikTok's public live page exposes a room id while a creator is actually live.
+  const roomId = html.match(/"(?:roomId|liveRoomId)"\s*:\s*"?(\d{5,})"?/i)?.[1] || '';
+  const liveSignal = roomId || /"(?:isLive|isLiveNow|liveStatus)"\s*:\s*(?:true|1|2)/i.test(html);
+  if (!liveSignal) return { live: false };
+
+  const titleRaw = html.match(/"(?:roomTitle|liveTitle|title)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/i)?.[1] || `${feed.creatorName || handle} đang LIVE`;
+  return {
+    live: true,
+    roomId,
+    title: decodeHtmlEntities(titleRaw.replace(/\\"/g, '"')),
+    url: liveUrl
+  };
+}
+
+function renderSocialMessage(template: string, values: Record<string, string>) {
+  let message = template || '🔴 **{platform} LIVE!**\n{title}\n{url}';
+  for (const [key, value] of Object.entries(values)) {
+    message = message.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
+  }
+  return message;
+}
+
+async function sendSocialAlert(
+  platform: 'youtube' | 'tiktok',
+  feed: YouTubeFeed | TikTokFeed,
+  event: { type: 'live' | 'upload'; title: string; url: string }
+) {
+  if (!discordClient || !discordClient.isReady()) {
+    throw new Error('Bot chưa kết nối Discord Gateway.');
+  }
+
+  let targetChannel: any = null;
+  if (feed.discordChannelId && /^\d{15,22}$/.test(feed.discordChannelId)) {
+    targetChannel = await discordClient.channels.fetch(feed.discordChannelId).catch(() => null);
+  }
+  if (!targetChannel && process.env.SOCIAL_FALLBACK_CHANNEL_ID && /^\d{15,22}$/.test(process.env.SOCIAL_FALLBACK_CHANNEL_ID)) {
+    targetChannel = await discordClient.channels.fetch(process.env.SOCIAL_FALLBACK_CHANNEL_ID).catch(() => null);
+  }
+  if (!targetChannel) {
+    targetChannel = discordClient.channels.cache.find((c) => c.type === ChannelType.GuildText);
+  }
+  if (!targetChannel || !('send' in targetChannel)) throw new Error('Không tìm thấy kênh Discord để gửi thông báo.');
+
+  const isLive = event.type === 'live';
+  const youtube = platform === 'youtube';
+  const name = youtube ? (feed as YouTubeFeed).channelName : (feed as TikTokFeed).creatorName;
+  const handle = youtube ? (feed as YouTubeFeed).channelUrl : (feed as TikTokFeed).creatorHandle;
+  const template = feed.customMessage || '';
+  const message = isLive
+    ? renderSocialMessage('🔴 **{platform} ĐANG LIVE!**\n**{title}**\nXem trực tiếp: {url}', {
+        channel_name: name,
+        creator_name: name,
+        video_title: event.title,
+        title: event.title,
+        url: event.url,
+        platform: youtube ? 'YouTube' : 'TikTok'
+      })
+    : renderSocialMessage(template, {
+        channel_name: name,
+        creator_name: name,
+        video_title: event.title,
+        title: event.title,
+        url: event.url,
+        platform: youtube ? 'YouTube' : 'TikTok'
+      });
+
+  const pingRoleId = feed.pingRoleId && /^\d{15,22}$/.test(feed.pingRoleId) ? feed.pingRoleId : '';
+  const contentPrefix = pingRoleId ? `<@&${pingRoleId}>\n` : '';
+  const title = youtube
+    ? (isLive ? '🔴 YouTube ĐANG LIVE' : '🔔 Video Mới Trên YouTube')
+    : (isLive ? '🔴 TikTok ĐANG LIVE' : '📱 Clip Mới Trên TikTok');
+  const color = youtube ? 0xff0033 : 0x00f2fe;
+
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(title)
+    .setDescription(message)
+    .setURL(event.url)
+    .setTimestamp()
+    .setFooter({ text: 'AegisBot • Social Monitor' });
+
+  await targetChannel.send({
+    content: contentPrefix,
+    embeds: [embed],
+    allowedMentions: pingRoleId ? { roles: [pingRoleId] } : { parse: [] }
+  });
+
+  appendLog({
+    actionType: 'SOCIAL_ALERT',
+    executor: { name: 'AegisBot Social Monitor', isBot: true },
+    details: `${youtube ? 'YouTube' : 'TikTok'} ${isLive ? 'LIVE' : 'VIDEO'}: "${event.title}"`,
+    severity: isLive ? 'warning' : 'info',
+    channelName: `#${targetChannel.name}`
+  });
+
+  return `#${targetChannel.name}`;
+}
+
+async function checkYouTubeFeed(feed: YouTubeFeed, result: SocialMonitorCheckResult) {
+  if (feed.status !== 'active') return;
+  result.youtube += 1;
+
+  const [latest, liveState] = await Promise.allSettled([
+    feed.notifyOnUpload ? getLatestYouTubeUpload(feed) : Promise.resolve(null),
+    feed.notifyOnLive ? getYouTubeLive(feed) : Promise.resolve({ live: false })
+  ]);
+
+  if (latest.status === 'rejected') {
+    result.errors.push(`YouTube ${feed.channelName}: ${latest.reason?.message || 'RSS error'}`);
+  } else if (latest.value) {
+    const video = latest.value;
+    const isPrimed = socialMonitorPrimed.has(`yt:${feed.id}`);
+    if (!feed.lastVideoUrl || feed.lastVideoUrl.includes('new_upload_') || feed.lastVideoUrl !== video.url) {
+      if (isPrimed && feed.notifyOnUpload) {
+        await sendSocialAlert('youtube', feed, { type: 'upload', title: video.title, url: video.url });
+        result.alertsSent += 1;
+      }
+      feed.lastVideoTitle = video.title;
+      feed.lastVideoUrl = video.url;
+    }
+    feed.lastChecked = new Date().toLocaleString('vi-VN');
+  }
+
+  if (liveState.status === 'rejected') {
+    result.errors.push(`YouTube Live ${feed.channelName}: ${liveState.reason?.message || 'live check error'}`);
+  } else if (liveState.value) {
+    const live = liveState.value.live;
+    const previous = feed.lastLiveStatus || 'offline';
+    const isPrimed = socialMonitorPrimed.has(`yt:${feed.id}`);
+    if (live && previous !== 'live') {
+      if (isPrimed && feed.notifyOnLive) {
+        await sendSocialAlert('youtube', feed, {
+          type: 'live',
+          title: ('title' in liveState.value && liveState.value.title) ? liveState.value.title : `Livestream của ${feed.channelName}`,
+          url: ('url' in liveState.value && liveState.value.url) ? liveState.value.url : `${normalizeYouTubeUrl(feed.channelUrl, feed.channelName)}/live`
+        });
+        result.alertsSent += 1;
+      }
+    }
+    feed.lastLiveStatus = live ? 'live' : 'offline';
+  }
+
+  socialMonitorPrimed.add(`yt:${feed.id}`);
+}
+
+async function checkTikTokFeed(feed: TikTokFeed, result: SocialMonitorCheckResult) {
+  if (feed.status !== 'active') return;
+  result.tiktok += 1;
+  try {
+    const state = await getTikTokLive(feed);
+    const previous = feed.lastLiveStatus || 'offline';
+    const isPrimed = socialMonitorPrimed.has(`tt:${feed.id}`);
+    if (state.live && previous !== 'live' && isPrimed) {
+      await sendSocialAlert('tiktok', feed, {
+        type: 'live',
+        title: state.title || `${feed.creatorName} đang LIVE`,
+        url: state.url
+      });
+      result.alertsSent += 1;
+    }
+    feed.lastLiveStatus = state.live ? 'live' : 'offline';
+    feed.lastChecked = new Date().toLocaleString('vi-VN');
+    socialMonitorPrimed.add(`tt:${feed.id}`);
+  } catch (error: any) {
+    result.errors.push(`TikTok ${feed.creatorHandle}: ${error?.message || 'live check error'}`);
+  }
+}
+
+async function runSocialMonitor(reason = 'interval'): Promise<SocialMonitorCheckResult> {
+  if (socialMonitorRunning) return lastSocialMonitorResult;
+  socialMonitorRunning = true;
+  const result: SocialMonitorCheckResult = {
+    youtube: 0,
+    tiktok: 0,
+    alertsSent: 0,
+    errors: [],
+    checkedAt: new Date().toISOString()
+  };
+  try {
+    if (!socialMonitorEnabled()) return result;
+    if (!discordClient || !discordClient.isReady()) {
+      result.errors.push('Discord Bot chưa online; chưa thể kiểm tra/bắn thông báo.');
+      return result;
+    }
+
+    for (const feed of liveSocialFeeds.youtube) {
+      try {
+        await checkYouTubeFeed(feed, result);
+      } catch (error: any) {
+        result.errors.push(`YouTube ${feed.channelName}: ${error?.message || 'unknown error'}`);
+      }
+    }
+    for (const feed of liveSocialFeeds.tiktok) {
+      try {
+        await checkTikTokFeed(feed, result);
+      } catch (error: any) {
+        result.errors.push(`TikTok ${feed.creatorHandle}: ${error?.message || 'unknown error'}`);
+      }
+    }
+  } finally {
+    socialMonitorRunning = false;
+    lastSocialMonitorResult = result;
+  }
+  if (reason === 'manual' && result.errors.length) {
+    console.warn('[Social Monitor]', result.errors.join(' | '));
+  }
+  return result;
+}
+
+function startSocialMonitor() {
+  if (socialMonitorTimer) clearInterval(socialMonitorTimer);
+  if (!socialMonitorEnabled()) {
+    console.log('[Social Monitor] Disabled by SOCIAL_MONITOR_ENABLED=false');
+    return;
+  }
+  const interval = socialMonitorIntervalMs();
+  console.log(`[Social Monitor] Enabled. Checking YouTube/TikTok every ${Math.round(interval / 1000)}s.`);
+  socialMonitorTimer = setInterval(() => {
+    void runSocialMonitor();
+  }, interval);
+  setTimeout(() => void runSocialMonitor('startup'), 8000);
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Admin authentication. Bot control APIs are private and require this session.
+  app.post('/api/auth/login', (req, res) => {
+    const { username, password } = req.body || {};
+    const expectedUsername = getAdminUsername();
+
+    if (!process.env.ADMIN_PASSWORD) {
+      return res.status(503).json({
+        ok: false,
+        error: 'ADMIN_PASSWORD_NOT_CONFIGURED',
+        message: 'Chưa cấu hình ADMIN_PASSWORD trong file .env.'
+      });
+    }
+
+    if (username !== expectedUsername || !verifyAdminPassword(String(password || ''))) {
+      return res.status(401).json({ ok: false, error: 'INVALID_CREDENTIALS', message: 'Sai tài khoản hoặc mật khẩu.' });
+    }
+
+    const payload: AdminSessionPayload = {
+      username: expectedUsername,
+      exp: Date.now() + AUTH_SESSION_TTL_MS,
+      nonce: randomBytes(16).toString('hex')
+    };
+
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    res.setHeader(
+      'Set-Cookie',
+      `${AUTH_COOKIE_NAME}=${encodeURIComponent(signSession(payload))}; HttpOnly; Path=/; Max-Age=${Math.floor(AUTH_SESSION_TTL_MS / 1000)}; SameSite=Lax${secure}`
+    );
+
+    res.json({ ok: true, username: expectedUsername, expiresAt: payload.exp });
+  });
+
+  app.get('/api/auth/me', (req, res) => {
+    const cookies = parseCookies(req.headers.cookie || '');
+    const session = verifySession(cookies[AUTH_COOKIE_NAME]);
+    if (!session) return res.status(401).json({ ok: false, authenticated: false });
+    res.json({ ok: true, authenticated: true, username: session.username, expiresAt: session.exp });
+  });
+
+  app.post('/api/auth/logout', (req, res) => {
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    res.setHeader(
+      'Set-Cookie',
+      `${AUTH_COOKIE_NAME}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${secure}`
+    );
+    res.json({ ok: true });
+  });
+
+  // Everything under /api/bot is protected from unauthenticated access.
+  app.use('/api/bot', requireAdmin);
+
 
   // 0. 24/7 Keep-Alive & Uptime Monitor Endpoint
   app.get('/api/health', (req, res) => {
@@ -1432,7 +1937,14 @@ async function startServer() {
           : null,
       guilds,
       error: botConnectionError,
-      recentLogs: liveAuditLogs.slice(0, 25)
+      recentLogs: liveAuditLogs.slice(0, 25),
+      socialMonitor: {
+        enabled: socialMonitorEnabled(),
+        intervalMs: socialMonitorIntervalMs(),
+        running: socialMonitorRunning,
+        lastResult: lastSocialMonitorResult
+      },
+      socialFeeds: liveSocialFeeds
     });
   });
 
@@ -1673,6 +2185,16 @@ async function startServer() {
     } catch (err: any) {
       return res.status(500).json({ ok: false, error: err.message });
     }
+  });
+
+  // 3e. Run Social Monitor immediately (YouTube/TikTok)
+  app.post('/api/bot/social-monitor/check', async (req, res) => {
+    const result = await runSocialMonitor('manual');
+    return res.json({
+      ok: result.errors.length === 0,
+      ...result,
+      socialFeeds: liveSocialFeeds
+    });
   });
 
   // 4. Reconnect / Retry bot login from environment variables
@@ -2144,6 +2666,8 @@ async function startServer() {
 
   // Start Discord Bot if token is configured in environment
   startDiscordBotIfConfigured();
+  // Start the real YouTube/TikTok notification monitor after the API is ready.
+  startSocialMonitor();
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

@@ -1,19 +1,23 @@
 import React from 'react';
 import { TabType, GuildInfo } from '../bot/types';
-import { Terminal, Bot, Sparkles, ExternalLink } from 'lucide-react';
+import { Terminal, Bot, Sparkles, ExternalLink, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   currentTab: TabType;
   onSelectTab: (tab: TabType) => void;
   activeGuild: GuildInfo;
   onInviteBot: () => void;
+  adminUsername: string;
+  onLogout: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentTab,
   onSelectTab,
   activeGuild,
-  onInviteBot
+  onInviteBot,
+  adminUsername,
+  onLogout
 }) => {
   return (
     <header className="flex items-center justify-between gap-8 px-6 py-3.5 bg-slate-900 border-b border-slate-800 text-slate-100 z-10 shrink-0">
@@ -80,6 +84,9 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Zone 3: 1 primary action */}
       <div className="flex items-center gap-3 shrink-0">
+        <span className="hidden xl:inline text-[11px] text-slate-400 max-w-[120px] truncate" title={adminUsername}>
+          Admin: <span className="text-slate-200">{adminUsername}</span>
+        </span>
         <button
           type="button"
           onClick={onInviteBot}
@@ -87,6 +94,15 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <ExternalLink className="w-3.5 h-3.5" />
           <span>Kết Nối Server Của Tôi</span>
+        </button>
+        <button
+          type="button"
+          onClick={onLogout}
+          className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white border border-slate-700 hover:border-slate-600 rounded-lg transition-colors whitespace-nowrap"
+          title="Đăng xuất Admin"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Thoát</span>
         </button>
       </div>
     </header>

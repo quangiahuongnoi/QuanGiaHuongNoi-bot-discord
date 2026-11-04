@@ -51,9 +51,13 @@ import { LogsView } from './components/LogsView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { ConnectServerView } from './components/ConnectServerView';
 import { BotCodeExportModal } from './components/BotCodeExportModal';
+import { LoginView } from './components/LoginView';
 import { AlertTriangle, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [adminUsername, setAdminUsername] = useState('admin');
   const [currentTab, setCurrentTab] = useState<TabType>('overview');
   const [guilds, setGuilds] = useState<GuildInfo[]>(INITIAL_GUILDS);
   const [activeGuild, setActiveGuild] = useState<GuildInfo>(INITIAL_GUILDS[0]);
@@ -103,6 +107,55 @@ export default function App() {
   // Modal
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
+  useEffect(() => {
+    let mounted = true;
+    fetch('/api/auth/me')
+      .then(async res => {
+        if (!mounted) return;
+        if (res.ok) {
+          const data = await res.json();
+          setIsAuthenticated(true);
+          if (data.username) setAdminUsername(data.username);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setAuthChecking(false);
+      });
+    return () => { mounted = false; };
+  }, []);
+
+  const handleLogin = async (username: string, password: string): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (data.error === 'ADMIN_PASSWORD_NOT_CONFIGURED') {
+          return 'Server chưa cấu hình ADMIN_PASSWORD trong file .env.';
+        }
+        return data.message || 'Đăng nhập thất bại.';
+      }
+      setIsAuthenticated(true);
+      setAdminUsername(data.username || username);
+      return null;
+    } catch {
+      return 'Không thể kết nối tới server.';
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+      setIsAuthenticated(false);
+      setBotInfo(null);
+    }
+  };
+
   const getNowTime = () => {
     const d = new Date();
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
@@ -144,9 +197,14 @@ export default function App() {
 
   // Poll live bot status from backend
   useEffect(() => {
+    if (!isAuthenticated) return;
     const fetchStatus = async () => {
       try {
         const res = await fetch('/api/bot/status');
+        if (res.status === 401) {
+          setIsAuthenticated(false);
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           if (data.status === 'connected') {
@@ -172,6 +230,10 @@ export default function App() {
             if (Array.isArray(data.recentLogs) && data.recentLogs.length > 0) {
               setAuditLogs(data.recentLogs);
             }
+            if (data.socialFeeds) {
+              if (Array.isArray(data.socialFeeds.youtube)) setYoutubeFeeds(data.socialFeeds.youtube);
+              if (Array.isArray(data.socialFeeds.tiktok)) setTiktokFeeds(data.socialFeeds.tiktok);
+            }
           } else if (data.status === 'connecting') {
             setBotStatus('idle');
           } else {
@@ -186,7 +248,7 @@ export default function App() {
     fetchStatus();
     const interval = setInterval(fetchStatus, 4000);
     return () => clearInterval(interval);
-  }, [activeGuild.id]);
+  }, [activeGuild.id, isAuthenticated]);
 
   const handleToggleModule = (key: keyof typeof modulesEnabled) => {
     setModulesEnabled(prev => {
@@ -424,6 +486,18 @@ export default function App() {
     return result;
   };
 
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center text-sm">
+        Đang kiểm tra phiên Admin...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginView onLogin={handleLogin} />;
+  }
+
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* Sidebar Navigation */}
@@ -455,6 +529,8 @@ export default function App() {
           onSelectTab={(tab) => setCurrentTab(tab)}
           activeGuild={activeGuild}
           onInviteBot={() => setCurrentTab('bot-deploy')}
+          adminUsername={adminUsername}
+          onLogout={handleLogout}
         />
 
         {/* Offline / Connect Banner if Bot is not connected */}
@@ -643,9 +719,11 @@ export default function App() {
                   });
                 }}
                 onToggleYouTubeFeed={(id) => {
-                  setYoutubeFeeds(prev =>
-                    prev.map(f => (f.id === id ? { ...f, enabled: !f.enabled } : f))
-                  );
+                  setYoutubeFeeds(prev => {
+                    const updated = prev.map(f => (f.id === id ? { ...f, status: f.status === 'active' ? 'paused' : 'active' } : f));
+                    syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, updated, undefined);
+                    return updated;
+                  });
                 }}
                 onAddTikTokFeed={(feed) => {
                   setTiktokFeeds(prev => {
@@ -658,7 +736,7 @@ export default function App() {
                     timestamp: getNowTime(),
                     actionType: 'SOCIAL_ALERT',
                     executor: { name: 'Admin Dashboard', isBot: false },
-                    details: `Đăng ký theo dõi tài khoản TikTok: @${feed.username}`,
+                    details: `Đăng ký theo dõi tài khoản TikTok: ${feed.creatorHandle}`,
                     severity: 'info',
                     channelName: '#thông-báo-live-video'
                   });
@@ -671,9 +749,11 @@ export default function App() {
                   });
                 }}
                 onToggleTikTokFeed={(id) => {
-                  setTiktokFeeds(prev =>
-                    prev.map(f => (f.id === id ? { ...f, enabled: !f.enabled } : f))
-                  );
+                  setTiktokFeeds(prev => {
+                    const updated = prev.map(f => (f.id === id ? { ...f, status: f.status === 'active' ? 'paused' : 'active' } : f));
+                    syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, updated);
+                    return updated;
+                  });
                 }}
                 guild={activeGuild}
               />

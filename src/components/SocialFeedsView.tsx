@@ -18,8 +18,10 @@ interface SocialFeedsViewProps {
   tiktokFeeds: TikTokFeed[];
   onAddYouTubeFeed: (feed: YouTubeFeed) => void;
   onRemoveYouTubeFeed: (id: string) => void;
+  onToggleYouTubeFeed: (id: string) => void;
   onAddTikTokFeed: (feed: TikTokFeed) => void;
   onRemoveTikTokFeed: (id: string) => void;
+  onToggleTikTokFeed: (id: string) => void;
   onTestNotification: (platform: 'youtube' | 'tiktok', title: string, url: string, channelName: string) => void;
   guild: GuildInfo;
 }
@@ -29,27 +31,34 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
   tiktokFeeds,
   onAddYouTubeFeed,
   onRemoveYouTubeFeed,
+  onToggleYouTubeFeed,
   onAddTikTokFeed,
   onRemoveTikTokFeed,
+  onToggleTikTokFeed,
   onTestNotification,
   guild
 }) => {
   const [activePlatform, setActivePlatform] = useState<'youtube' | 'tiktok'>('youtube');
   const [showAddModal, setShowAddModal] = useState(false);
   const [testNotificationSent, setTestNotificationSent] = useState<string | null>(null);
+  const [monitorChecking, setMonitorChecking] = useState(false);
 
   // Form states
   const [ytName, setYtName] = useState('');
   const [ytUrl, setYtUrl] = useState('');
-  const [ytChannelId, setYtChannelId] = useState('c-social');
-  const [ytPingRole, setYtPingRole] = useState('r-yt-notif');
+  const [ytChannelId, setYtChannelId] = useState('');
+  const [ytPingRole, setYtPingRole] = useState('');
   const [ytTemplate, setYtTemplate] = useState('🚨 **VIDEO MỚI TỪ {channel_name}!**\n{video_title}\nXem ngay tại: {url}');
 
   const [ttHandle, setTtHandle] = useState('@');
   const [ttName, setTtName] = useState('');
-  const [ttChannelId, setTtChannelId] = useState('c-social');
-  const [ttPingRole, setTtPingRole] = useState('r-tt-notif');
+  const [ttChannelId, setTtChannelId] = useState('');
+  const [ttPingRole, setTtPingRole] = useState('');
   const [ttTemplate, setTtTemplate] = useState('📱 **TIKTOK VIDEO MỚI TỪ {creator_name}!**\n{video_title}\nThả tim ngay: {url}');
+
+  const textChannels = guild.channels.filter((channel) => channel.type === 'text');
+  const roles = guild.roles || [];
+  const defaultChannelId = textChannels[0]?.id || '';
 
   const handleCreateFeed = (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,10 +68,10 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
         id: `yt-${Date.now()}`,
         channelName: ytName.trim(),
         channelUrl: ytUrl.trim() || `https://youtube.com/@${encodeURIComponent(ytName)}`,
-        channelId: `UC_${Date.now()}`,
+        channelId: '',
         avatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100&auto=format&fit=crop&q=80',
-        discordChannelId: ytChannelId,
-        pingRoleId: ytPingRole,
+        discordChannelId: ytChannelId || defaultChannelId,
+        pingRoleId: ytPingRole || undefined,
         customMessage: ytTemplate,
         lastVideoTitle: `Video mới nhất từ ${ytName}`,
         lastVideoUrl: `https://youtube.com/watch?v=new_upload_${Date.now()}`,
@@ -73,14 +82,14 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
       };
       onAddYouTubeFeed(newYt);
     } else {
-      if (!ttHandle.trim()) return;
+      if (!ttHandle.trim() || ttHandle.trim() === '@') return;
       const newTt: TikTokFeed = {
         id: `tt-${Date.now()}`,
         creatorHandle: ttHandle.trim(),
         creatorName: ttName.trim() || ttHandle.trim(),
         avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-        discordChannelId: ttChannelId,
-        pingRoleId: ttPingRole,
+        discordChannelId: ttChannelId || defaultChannelId,
+        pingRoleId: ttPingRole || undefined,
         customMessage: ttTemplate,
         lastLiveStatus: 'offline',
         lastVideoTitle: `Clip ngắn xu hướng từ ${ttHandle}`,
@@ -144,7 +153,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Tự động thông báo lên máy chủ Discord khi thần tượng, đối tác hoặc kênh nội bộ của bạn ra mắt video hoặc bắt đầu Livestream
+            Tự động kiểm tra định kỳ và thông báo vào Discord khi YouTube/TikTok ra video mới hoặc bắt đầu Livestream. Lần kiểm tra đầu tiên chỉ lấy trạng thái làm mốc, không spam thông báo.
           </p>
         </div>
 
@@ -177,6 +186,36 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
             </button>
           </div>
 
+          <button
+            type="button"
+            disabled={monitorChecking}
+            onClick={async () => {
+              setMonitorChecking(true);
+              try {
+                const res = await fetch('/api/bot/social-monitor/check', { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (data.socialFeeds) {
+                  // The parent polls /api/bot/status, so this message is only for immediate feedback.
+                }
+                if (data.alertsSent) {
+                  setTestNotificationSent(`Đã kiểm tra và gửi ${data.alertsSent} thông báo mới.`);
+                } else if (data.errors?.length) {
+                  setTestNotificationSent(`⚠️ ${data.errors[0]}`);
+                } else {
+                  setTestNotificationSent('Đã kiểm tra YouTube/TikTok. Không có sự kiện mới.');
+                }
+              } catch {
+                setTestNotificationSent('⚠️ Không thể gọi Social Monitor.');
+              } finally {
+                setMonitorChecking(false);
+                setTimeout(() => setTestNotificationSent(null), 5000);
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-lg text-xs font-semibold transition-colors"
+          >
+            <Radio className="w-4 h-4" />
+            <span>{monitorChecking ? 'Đang kiểm tra...' : 'Kiểm tra ngay'}</span>
+          </button>
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
@@ -236,7 +275,12 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                   <span>Video / Livestream Gần Nhất:</span>
                   <span className="text-slate-500 font-mono">{feed.lastChecked}</span>
                 </div>
-                <div className="text-slate-200 font-medium truncate">{feed.lastVideoTitle}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-slate-200 font-medium truncate">{feed.lastVideoTitle}</div>
+                  {feed.lastLiveStatus === 'live' && (
+                    <span className="shrink-0 text-[9px] font-bold text-rose-300 bg-rose-500/15 border border-rose-500/30 rounded-full px-2 py-0.5 animate-pulse">🔴 LIVE</span>
+                  )}
+                </div>
                 <a
                   href={feed.lastVideoUrl}
                   target="_blank"
@@ -249,18 +293,22 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
-                <div className="flex items-center gap-2 text-[11px] text-emerald-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Đang theo dõi tự động</span>
-                </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onToggleYouTubeFeed(feed.id)}
+                  className={`flex items-center gap-2 text-[11px] font-medium ${feed.status === 'active' ? 'text-emerald-400' : 'text-slate-500'}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${feed.status === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
+                  <span>{feed.status === 'active' ? 'Đang theo dõi tự động' : 'Đã tạm dừng'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => triggerTestPush(feed, 'youtube')}
                   className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
                 >
                   <Send className="w-3 h-3 text-indigo-400" />
-                  <span>Test Bắn Thông Báo</span>
+                  <span>Test</span>
                 </button>
               </div>
             </div>
@@ -324,18 +372,22 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
-                <div className="flex items-center gap-2 text-[11px] text-emerald-400 font-medium">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Đang theo dõi tự động</span>
-                </div>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onToggleTikTokFeed(feed.id)}
+                  className={`flex items-center gap-2 text-[11px] font-medium ${feed.status === 'active' ? 'text-emerald-400' : 'text-slate-500'}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${feed.status === 'active' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
+                  <span>{feed.status === 'active' ? 'Đang theo dõi tự động' : 'Đã tạm dừng'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => triggerTestPush(feed, 'tiktok')}
                   className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
                 >
                   <Send className="w-3 h-3 text-cyan-400" />
-                  <span>Test Bắn Thông Báo</span>
+                  <span>Test</span>
                 </button>
               </div>
             </div>
@@ -391,6 +443,21 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
                     />
                   </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Kênh Discord nhận thông báo</label>
+                      <select value={ytChannelId || defaultChannelId} onChange={(e) => setYtChannelId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                        {textChannels.length ? textChannels.map((channel) => <option key={channel.id} value={channel.id}>#{channel.name}</option>) : <option value="">Chưa lấy được kênh Discord</option>}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Role được ping</label>
+                      <select value={ytPingRole} onChange={(e) => setYtPingRole(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                        <option value="">Không ping role</option>
+                        {roles.map((role) => <option key={role.id} value={role.id}>@{role.name}</option>)}
+                      </select>
+                    </div>
+                  </div>
                 </>
               ) : (
                 <>
@@ -418,6 +485,21 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
                       placeholder="Schannel Official"
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
                     />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Kênh Discord nhận thông báo</label>
+                      <select value={ttChannelId || defaultChannelId} onChange={(e) => setTtChannelId(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                        {textChannels.length ? textChannels.map((channel) => <option key={channel.id} value={channel.id}>#{channel.name}</option>) : <option value="">Chưa lấy được kênh Discord</option>}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-300 mb-1">Role được ping</label>
+                      <select value={ttPingRole} onChange={(e) => setTtPingRole(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                        <option value="">Không ping role</option>
+                        {roles.map((role) => <option key={role.id} value={role.id}>@{role.name}</option>)}
+                      </select>
+                    </div>
                   </div>
                 </>
               )}

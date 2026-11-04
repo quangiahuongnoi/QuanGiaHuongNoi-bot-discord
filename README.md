@@ -123,3 +123,56 @@ docker build -t aegis-discord-bot .
 docker run -d -p 3000:3000 --env-file .env --name aegisbot --restart always aegis-discord-bot
 ```
 Endpoint kiểm tra tình trạng kết nối: `http://localhost:3000/api/health`.
+
+
+## 🔐 Admin Login (Web Control Panel)
+
+Trang điều khiển bot hiện yêu cầu đăng nhập Admin trước khi truy cập các API `/api/bot/*`.
+
+Thêm vào file `.env`:
+
+```env
+ADMIN_USERNAME="admin"
+ADMIN_PASSWORD="mat-khau-manh-cua-ban"
+SESSION_SECRET="mot-chuoi-bi-mat-dai-it-nhat-32-ky-tu"
+```
+
+Sau đó khởi động lại server:
+
+```bash
+npm install
+npm run dev
+```
+
+Mở `http://localhost:3000/control` hoặc URL của dashboard. Phiên đăng nhập có thời hạn 8 giờ và dùng cookie `HttpOnly`. Endpoint `/api/health` vẫn mở để health-check, còn các API điều khiển bot yêu cầu đăng nhập.
+
+> Không đưa file `.env` lên GitHub. File `.gitignore` đã bỏ qua `.env*`.
+
+
+## 📡 YouTube / TikTok Live Monitor
+
+Phân hệ Social hiện có **polling thật ở backend**, không còn chỉ là nút Test:
+
+- YouTube: đọc RSS của kênh để phát hiện video mới; phát hiện Live bằng YouTube Data API nếu có `YOUTUBE_API_KEY`, nếu không sẽ dùng trang `/live` làm fallback.
+- TikTok: kiểm tra public Live page của tài khoản và phát hiện chuyển trạng thái `offline → live`.
+- Chỉ gửi thông báo khi có **sự kiện mới**; lần kiểm tra đầu tiên dùng làm mốc để tránh spam sau khi restart.
+- Có nút **Kiểm tra ngay** trên dashboard để chạy poll thủ công.
+- Có thể chọn **kênh Discord** và **role ping** trực tiếp khi thêm feed.
+- Khoảng kiểm tra mặc định: 60 giây. Có thể chỉnh trong `.env`.
+
+Thêm vào `.env`:
+
+```env
+SOCIAL_MONITOR_ENABLED="true"
+SOCIAL_MONITOR_INTERVAL_MS="60000"
+YOUTUBE_API_KEY=""
+SOCIAL_FALLBACK_CHANNEL_ID=""
+```
+
+> Khuyến nghị tạo YouTube Data API v3 key nếu bạn muốn phát hiện livestream YouTube ổn định hơn. Không commit API key vào GitHub.
+
+Nếu dependency của project báo xung đột `opusscript` / `prism-media`, cài bằng:
+
+```bash
+npm install --legacy-peer-deps
+```

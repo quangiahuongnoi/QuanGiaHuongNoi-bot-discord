@@ -303,6 +303,7 @@ export const INITIAL_YOUTUBE_FEEDS: YouTubeFeed[] = [
     lastChecked: 'Vừa xong',
     notifyOnLive: true,
     notifyOnUpload: true,
+    lastLiveStatus: 'offline',
     status: 'active'
   },
   {
@@ -319,6 +320,7 @@ export const INITIAL_YOUTUBE_FEEDS: YouTubeFeed[] = [
     lastChecked: '12 phút trước',
     notifyOnLive: false,
     notifyOnUpload: true,
+    lastLiveStatus: 'offline',
     status: 'active'
   }
 ];
