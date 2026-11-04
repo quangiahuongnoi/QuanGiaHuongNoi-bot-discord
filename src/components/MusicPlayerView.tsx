@@ -112,6 +112,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          guildId: guild.id,
           voiceChannelId: selectedVoiceChannelId || undefined,
           action,
           query: customQuery || currentTrack?.title || 'Chìm Sâu RPT MCK'
