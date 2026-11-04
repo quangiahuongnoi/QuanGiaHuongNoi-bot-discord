@@ -44,7 +44,24 @@ export default defineConfig(() => {
           ]
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true,
+          globPatterns: ['**/*.{js,css,ico,png,svg,woff,woff2}'],
+          globIgnores: ['**/index.html'],
+          runtimeCaching: [
+            {
+              urlPattern: ({ request }) => request.destination === 'document',
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'aegisbot-html-v3',
+                networkTimeoutSeconds: 5,
+                cacheableResponse: {
+                  statuses: [200]
+                }
+              }
+            }
+          ]
         },
         devOptions: {
           enabled: true,
