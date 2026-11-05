@@ -2252,7 +2252,9 @@ let lastSocialMonitorResult: SocialMonitorCheckResult = {
 };
 
 function youtubeUploadNotificationsEnabled() {
-  return String(process.env.SOCIAL_YOUTUBE_UPLOAD_NOTIFICATIONS || 'false').toLowerCase() === 'true';
+  // YouTube upload notifications are intentionally disabled.
+  // The bot should only send YouTube LIVE alerts; never announce newly uploaded videos.
+  return false;
 }
 
 function socialMonitorEnabled() {
