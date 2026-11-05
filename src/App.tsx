@@ -913,12 +913,9 @@ export default function App() {
                 reactionRoleGroups={reactionRoleGroups}
                 levelRoles={levelRoles}
                 joinRoleEnabled={joinRoleEnabled}
-                onToggleJoinRole={() => {
-                  setJoinRoleEnabled(prev => {
-                    const next = !prev;
-                    void syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, undefined, next, reactionRoleGroups);
-                    return next;
-                  });
+                onToggleJoinRole={(enabled) => {
+                  setJoinRoleEnabled(enabled);
+                  void syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, undefined, enabled, reactionRoleGroups);
                 }}
                 onAddReactionRoleGroup={(group) => {
                   setReactionRoleGroups(prev => {
