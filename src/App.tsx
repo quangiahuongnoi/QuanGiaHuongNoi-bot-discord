@@ -693,6 +693,9 @@ export default function App() {
                 onNavigateTab={(tab) => setCurrentTab(tab)}
                 onOpenExport={() => setCurrentTab('bot-deploy')}
                 discordClientId={discordClientId}
+                analytics={analytics}
+                botPing={botInfo?.ping || 0}
+                queueCount={Math.max(0, tracks.length - (isPlaying ? 1 : 0))}
               />
             )}
 
