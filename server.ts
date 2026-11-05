@@ -2251,6 +2251,10 @@ let lastSocialMonitorResult: SocialMonitorCheckResult = {
   checkedAt: ''
 };
 
+function youtubeUploadNotificationsEnabled() {
+  return String(process.env.SOCIAL_YOUTUBE_UPLOAD_NOTIFICATIONS || 'false').toLowerCase() === 'true';
+}
+
 function socialMonitorEnabled() {
   return String(process.env.SOCIAL_MONITOR_ENABLED || 'true').toLowerCase() !== 'false';
 }
@@ -2565,7 +2569,7 @@ async function checkYouTubeFeed(feed: YouTubeFeed, result: SocialMonitorCheckRes
   result.youtube += 1;
 
   const [latest, liveState] = await Promise.allSettled([
-    feed.notifyOnUpload ? getLatestYouTubeUpload(feed) : Promise.resolve(null),
+    youtubeUploadNotificationsEnabled() && feed.notifyOnUpload ? getLatestYouTubeUpload(feed) : Promise.resolve(null),
     feed.notifyOnLive ? getYouTubeLive(feed) : Promise.resolve({ live: false })
   ]);
 
@@ -2575,7 +2579,7 @@ async function checkYouTubeFeed(feed: YouTubeFeed, result: SocialMonitorCheckRes
     const video = latest.value;
     const isPrimed = socialMonitorPrimed.has(`yt:${feed.id}`);
     if (!feed.lastVideoUrl || feed.lastVideoUrl.includes('new_upload_') || feed.lastVideoUrl !== video.url) {
-      if (isPrimed && feed.notifyOnUpload) {
+      if (isPrimed && feed.notifyOnUpload && youtubeUploadNotificationsEnabled()) {
         await sendSocialAlert('youtube', feed, { type: 'upload', title: video.title, url: video.url });
         result.alertsSent += 1;
       }
