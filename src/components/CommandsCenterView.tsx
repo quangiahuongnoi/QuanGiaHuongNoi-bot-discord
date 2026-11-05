@@ -31,7 +31,7 @@ interface CommandsCenterViewProps {
   onToggleCommand: (id: string) => void;
   onAddCustomCommand: (cmd: DiscordCommandDef) => void;
   onDeleteCustomCommand: (id: string) => void;
-  onExecuteCommandInApp: (input: string) => CommandExecutionOutput;
+  onExecuteCommandInApp: (input: string) => Promise<CommandExecutionOutput>;
   guild: GuildInfo;
 }
 
@@ -90,10 +90,10 @@ export const CommandsCenterView: React.FC<CommandsCenterViewProps> = ({
     setTimeout(() => setCopiedId(null), 1800);
   };
 
-  const handleRunQuickCommand = (inputToRun?: string) => {
+  const handleRunQuickCommand = async (inputToRun?: string) => {
     const raw = (inputToRun ?? quickCmdInput).trim();
     if (!raw) return;
-    const out = onExecuteCommandInApp(raw);
+    const out = await onExecuteCommandInApp(raw);
     const now = new Date();
     const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
     setLastCmdResult({
