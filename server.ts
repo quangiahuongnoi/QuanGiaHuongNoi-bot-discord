@@ -3433,7 +3433,6 @@ async function startServer() {
       const bucket = dayMap.get(key) || { joins: 0, leaves: 0 };
       // Reconstruct the best available historical total from tracked join/leave
       // events instead of repeating today's member count for every day.
-      const eventsAfterDay = [...memberJoinEvents.filter((ts) => ts > d.getTime()), ...memberLeaveEvents.filter((ts) => ts > d.getTime())];
       const joinsAfterDay = memberJoinEvents.filter((ts) => ts > d.getTime()).length;
       const leavesAfterDay = memberLeaveEvents.filter((ts) => ts > d.getTime()).length;
       const estimatedTotal = Math.max(0, currentMemberCount - joinsAfterDay + leavesAfterDay);
