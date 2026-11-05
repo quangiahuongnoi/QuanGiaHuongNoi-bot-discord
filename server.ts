@@ -124,6 +124,7 @@ let liveConfig = {
   autoModConfig: { ...INITIAL_AUTOMOD } as AutoModConfig,
   joinRoleEnabled: true,
   defaultMemberRoleId: process.env.DEFAULT_MEMBER_ROLE_ID || '',
+  defaultBotRoleId: process.env.DEFAULT_BOT_ROLE_ID || '',
   modulesEnabled: {
     autoResponder: true,
     music: true,
@@ -1311,8 +1312,10 @@ async function startDiscordBotIfConfigured() {
       scheduleRuntimePersistence();
       if (!liveConfig.modulesEnabled.autoRole || !liveConfig.joinRoleEnabled) return;
       try {
-        if (liveConfig.defaultMemberRoleId && !member.user.bot) {
-          await member.roles.add(liveConfig.defaultMemberRoleId);
+        const roleId = member.user.bot ? liveConfig.defaultBotRoleId : liveConfig.defaultMemberRoleId;
+        if (roleId) {
+          const role = member.guild.roles.cache.get(roleId);
+          if (role && !role.managed && role.editable) await member.roles.add(roleId);
         }
         appendLog({
           actionType: 'MEMBER_JOIN',
@@ -2986,6 +2989,7 @@ async function startServer() {
         autoModConfig: liveConfig.autoModConfig,
         joinRoleEnabled: liveConfig.joinRoleEnabled,
         defaultMemberRoleId: liveConfig.defaultMemberRoleId,
+        defaultBotRoleId: liveConfig.defaultBotRoleId,
         modulesEnabled: liveConfig.modulesEnabled,
         levelRoles: liveConfig.levelRoles,
         reactionRoles: liveConfig.reactionRoles
@@ -3249,6 +3253,8 @@ async function startServer() {
       autoResponses,
       autoModConfig,
       joinRoleEnabled,
+      defaultMemberRoleId,
+      defaultBotRoleId,
       modulesEnabled,
       levelRoles,
       reactionRoles,
@@ -3259,6 +3265,8 @@ async function startServer() {
     if (Array.isArray(autoResponses)) liveConfig.autoResponses = autoResponses;
     if (autoModConfig) liveConfig.autoModConfig = autoModConfig;
     if (typeof joinRoleEnabled === 'boolean') liveConfig.joinRoleEnabled = joinRoleEnabled;
+    if (typeof defaultMemberRoleId === 'string') liveConfig.defaultMemberRoleId = defaultMemberRoleId;
+    if (typeof defaultBotRoleId === 'string') liveConfig.defaultBotRoleId = defaultBotRoleId;
     if (modulesEnabled) liveConfig.modulesEnabled = { ...liveConfig.modulesEnabled, ...modulesEnabled };
     if (Array.isArray(levelRoles)) liveConfig.levelRoles = levelRoles;
     if (Array.isArray(reactionRoles)) liveConfig.reactionRoles = reactionRoles;
