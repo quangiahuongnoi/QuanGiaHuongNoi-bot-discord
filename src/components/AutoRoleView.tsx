@@ -44,6 +44,16 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
   const [newLevelReq, setNewLevelReq] = useState(10);
   const [newLevelRoleName, setNewLevelRoleName] = useState('🌟 Tinh Hoa Máy Chủ');
 
+  // Backend data can be empty/malformed while the bot is reconnecting. Normalize it
+  // here so this view can never crash the whole dashboard because of a bad role payload.
+  const safeReactionRoleGroups = Array.isArray(reactionRoleGroups)
+    ? reactionRoleGroups.filter(Boolean).map((group) => ({
+        ...group,
+        items: Array.isArray(group.items) ? group.items.filter(Boolean) : []
+      }))
+    : [];
+  const safeLevelRoles = Array.isArray(levelRoles) ? levelRoles.filter(Boolean) : [];
+
   const handleTestClickButtonRole = (roleName: string) => {
     setClickedRolesNotice(`Nút bấm vai trò "${roleName}" hoạt động tốt!`);
     setTimeout(() => setClickedRolesNotice(null), 2500);
@@ -153,7 +163,7 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
       {activeTab === 'buttons' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {reactionRoleGroups.map((group) => (
+            {safeReactionRoleGroups.map((group) => (
               <div key={group.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
                 <div className="flex items-start justify-between">
                   <div>
@@ -261,7 +271,7 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
               </p>
 
               <div className="space-y-2">
-                {levelRoles.map((lr) => (
+                {safeLevelRoles.map((lr) => (
                   <div
                     key={lr.roleId}
                     className="flex items-center justify-between p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs"
