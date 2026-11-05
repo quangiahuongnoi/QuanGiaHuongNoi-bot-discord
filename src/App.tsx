@@ -187,7 +187,9 @@ export default function App() {
     customYT?: YouTubeFeed[],
     customTT?: TikTokFeed[],
     customJoinRoleEnabled?: boolean,
-    customReactionRoles?: ReactionRoleGroup[]
+    customReactionRoles?: ReactionRoleGroup[],
+    customDefaultMemberRoleId?: string,
+    customDefaultBotRoleId?: string
   ) => {
     const payload: Record<string, unknown> = {};
     if (customCommands !== undefined) payload.commands = customCommands;
@@ -199,6 +201,8 @@ export default function App() {
     if (customTT !== undefined) payload.tiktokFeeds = customTT;
     if (customJoinRoleEnabled !== undefined) payload.joinRoleEnabled = customJoinRoleEnabled;
     if (customReactionRoles !== undefined) payload.reactionRoles = customReactionRoles;
+    if (customDefaultMemberRoleId !== undefined) payload.defaultMemberRoleId = customDefaultMemberRoleId;
+    if (customDefaultBotRoleId !== undefined) payload.defaultBotRoleId = customDefaultBotRoleId;
     if (Object.keys(payload).length === 0) return;
 
     try {
@@ -284,6 +288,9 @@ export default function App() {
               if (Array.isArray(data.config.autoResponses)) setAutoResponses(data.config.autoResponses);
               if (data.config.autoModConfig) setAutoModConfig(data.config.autoModConfig);
               if (typeof data.config.joinRoleEnabled === 'boolean') setJoinRoleEnabled(data.config.joinRoleEnabled);
+              if (data.config.defaultMemberRoleId !== undefined || data.config.defaultBotRoleId !== undefined) {
+                setActiveGuild(prev => ({ ...prev, defaultMemberRoleId: data.config.defaultMemberRoleId || '', defaultBotRoleId: data.config.defaultBotRoleId || '' } as any));
+              }
               if (data.config.modulesEnabled) setModulesEnabled(prev => ({ ...prev, ...data.config.modulesEnabled }));
               if (Array.isArray(data.config.levelRoles)) setLevelRoles(data.config.levelRoles);
               if (Array.isArray(data.config.reactionRoles)) setReactionRoleGroups(data.config.reactionRoles);
@@ -313,6 +320,17 @@ export default function App() {
       clearInterval(analyticsTimer);
     };
   }, [activeGuild.id, isAuthenticated]);
+
+  useEffect(() => {
+    const onMemberRole = (event: Event) => void syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, (event as CustomEvent<string>).detail || '', undefined);
+    const onBotRole = (event: Event) => void syncConfigToBackend(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, (event as CustomEvent<string>).detail || '');
+    window.addEventListener('qghn:default-member-role', onMemberRole);
+    window.addEventListener('qghn:default-bot-role', onBotRole);
+    return () => {
+      window.removeEventListener('qghn:default-member-role', onMemberRole);
+      window.removeEventListener('qghn:default-bot-role', onBotRole);
+    };
+  }, []);
 
   const handleToggleModule = (key: keyof typeof modulesEnabled) => {
     setModulesEnabled(prev => {
