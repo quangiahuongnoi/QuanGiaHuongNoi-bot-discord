@@ -733,29 +733,24 @@ export function executeBotCommand(
     case 'tiktok':
       return {
         handled: true,
-        replyContent: '📡 Danh sách kênh YouTube & TikTok đang được theo dõi tự động 24/7:',
+        replyContent: '📡 Social Monitor sẽ đọc danh sách feed trực tiếp từ cấu hình Bot runtime.',
         embed: {
-          title: '🔔 Hệ Thống Thông Báo Live & Video Mới',
-          description:
-            '• **YouTube:** Độ Mixi, F8 Official (Tự động báo khi có Video/Live)\n' +
-            '• **TikTok:** @schannelvn, @vtv24news (Đang theo dõi trạng thái Live 24/7)',
+          title: '🔔 Social Monitor',
+          description: 'Bản xem trước không chứa tên kênh mẫu. Khi thực thi thật, backend sẽ trả về dữ liệu Social hiện tại.',
           color: '#EC4899',
-          footer: 'Quản lý danh sách kênh tại tab Thông Báo TikTok/YT trên Web App'
+          footer: 'Web Command Console dùng Discord runtime thật.'
         }
       };
 
     case 'autorole':
       return {
         handled: true,
-        replyContent: '🎭 Bảng chọn vai trò tự động (Auto-Role):',
+        replyContent: '🎭 Auto-Role sẽ sử dụng các bảng vai trò đã cấu hình trong Discord runtime.',
         embed: {
-          title: '🔔 Đăng Ký Nhận Thông Báo & Vai Trò Máy Chủ',
-          description:
-            '• 📺 **Nhận Tin YouTube** — Ping khi có video mới\n' +
-            '• 📱 **Nhận Tin TikTok** — Ping khi kênh lên sóng Live\n' +
-            '• 🎮 **Valorant / Liên Minh / Minecraft** — Tìm đồng đội leo rank',
+          title: '🎭 Auto-Role',
+          description: 'Không sử dụng role mẫu cố định trong bản xem trước.',
           color: '#8B5CF6',
-          footer: 'Hệ thống Auto-Role cấp quyền tức thì'
+          footer: 'Web Command Console sẽ đăng bảng Auto-Role thật khi có cấu hình.'
         }
       };
 
