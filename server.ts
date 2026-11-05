@@ -2229,6 +2229,17 @@ interface SocialMonitorCheckResult {
 let socialMonitorTimer: NodeJS.Timeout | null = null;
 let socialMonitorRunning = false;
 const socialMonitorPrimed = new Set<string>();
+const socialLiveStability = new Map<string, {
+  live: boolean;
+  consecutiveLive: number;
+  videoKey: string;
+}>();
+const socialLiveAlerted = new Map<string, {
+  videoKey: string;
+  alertedAt: number;
+}>();
+const SOCIAL_LIVE_CONFIRMATIONS_REQUIRED = 2;
+const SOCIAL_LIVE_ALERT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 let lastSocialMonitorResult: SocialMonitorCheckResult = {
   youtube: 0,
   tiktok: 0,
@@ -2462,7 +2473,26 @@ async function sendSocialAlert(
   }
 
   let targetChannel: any = null;
-  if (feed.discordChannelId && /^\d{15,22}$/.test(feed.discordChannelId)) {
+  const isLive = event.type === 'live';
+
+  // LIVE alerts always go to the dedicated #thông-báo-live room.
+  // An explicit channel ID takes priority; otherwise match the exact channel name.
+  if (isLive) {
+    const liveChannelId = String(process.env.SOCIAL_LIVE_CHANNEL_ID || '').trim();
+    const liveChannelName = String(process.env.SOCIAL_LIVE_CHANNEL_NAME || 'thông-báo-live').trim();
+
+    if (liveChannelId && /^\d{15,22}$/.test(liveChannelId)) {
+      targetChannel = await discordClient.channels.fetch(liveChannelId).catch(() => null);
+    }
+
+    if (!targetChannel && liveChannelName) {
+      targetChannel = discordClient.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === liveChannelName
+      ) || null;
+    }
+  }
+
+  if (!targetChannel && feed.discordChannelId && /^\d{15,22}$/.test(feed.discordChannelId)) {
     targetChannel = await discordClient.channels.fetch(feed.discordChannelId).catch(() => null);
   }
   if (!targetChannel && process.env.SOCIAL_FALLBACK_CHANNEL_ID && /^\d{15,22}$/.test(process.env.SOCIAL_FALLBACK_CHANNEL_ID)) {
@@ -2473,7 +2503,6 @@ async function sendSocialAlert(
   }
   if (!targetChannel || !('send' in targetChannel)) throw new Error('Không tìm thấy kênh Discord để gửi thông báo.');
 
-  const isLive = event.type === 'live';
   const youtube = platform === 'youtube';
   const name = youtube ? (feed as YouTubeFeed).channelName : (feed as TikTokFeed).creatorName;
   const handle = youtube ? (feed as YouTubeFeed).channelUrl : (feed as TikTokFeed).creatorHandle;
@@ -2559,20 +2588,69 @@ async function checkYouTubeFeed(feed: YouTubeFeed, result: SocialMonitorCheckRes
     const live = liveState.value.live;
     const previous = feed.lastLiveStatus || 'offline';
     const isPrimed = socialMonitorPrimed.has(`yt:${feed.id}`);
-    if (live && previous !== 'live') {
+    const videoKey = live
+      ? String(('videoId' in liveState.value && liveState.value.videoId) || ('url' in liveState.value && liveState.value.url) || `youtube:${feed.id}`)
+      : '';
+    const stabilityKey = `yt:${feed.id}`;
+    const stability = socialLiveStability.get(stabilityKey) || {
+      live: false,
+      consecutiveLive: 0,
+      videoKey: ''
+    };
+
+    if (live) {
+      if (stability.live && stability.videoKey === videoKey) {
+        stability.consecutiveLive += 1;
+      } else if (stability.videoKey === videoKey) {
+        stability.consecutiveLive += 1;
+      } else {
+        stability.consecutiveLive = 1;
+      }
+      stability.live = true;
+      stability.videoKey = videoKey;
+      socialLiveStability.set(stabilityKey, stability);
+    } else {
+      socialLiveStability.set(stabilityKey, {
+        live: false,
+        consecutiveLive: 0,
+        videoKey: ''
+      });
+    }
+
+    const confirmedLive = live &&
+      stability.consecutiveLive >= SOCIAL_LIVE_CONFIRMATIONS_REQUIRED &&
+      stability.videoKey === videoKey;
+
+    if (confirmedLive && previous !== 'live') {
       const startupGraceActive = socialMonitorStartupGraceActive();
-      if (isPrimed && !startupGraceActive && feed.notifyOnLive) {
+      const alerted = socialLiveAlerted.get(stabilityKey);
+      const cooldownActive = Boolean(
+        alerted &&
+        alerted.videoKey === videoKey &&
+        Date.now() - alerted.alertedAt < SOCIAL_LIVE_ALERT_COOLDOWN_MS
+      );
+
+      if (isPrimed && !startupGraceActive && !cooldownActive && feed.notifyOnLive) {
         await sendSocialAlert('youtube', feed, {
           type: 'live',
           title: ('title' in liveState.value && liveState.value.title) ? liveState.value.title : `Livestream của ${feed.channelName}`,
           url: ('url' in liveState.value && liveState.value.url) ? liveState.value.url : `${normalizeYouTubeUrl(feed.channelUrl, feed.channelName)}/live`
         });
+        socialLiveAlerted.set(stabilityKey, { videoKey, alertedAt: Date.now() });
         result.alertsSent += 1;
       } else if (isPrimed && startupGraceActive && feed.notifyOnLive) {
         console.log(`[Social Monitor] Suppressed YouTube startup LIVE transition for ${feed.channelName}.`);
       }
     }
-    feed.lastLiveStatus = live ? 'live' : 'offline';
+
+    // Only promote the persisted state to LIVE after the detector confirms
+    // two consecutive positive checks. A single scraper false-negative/positive
+    // therefore cannot flap the alert state.
+    if (confirmedLive) {
+      feed.lastLiveStatus = 'live';
+    } else if (!live) {
+      feed.lastLiveStatus = 'offline';
+    }
   }
 
   socialMonitorPrimed.add(`yt:${feed.id}`);
@@ -2605,19 +2683,65 @@ async function checkTikTokFeed(feed: TikTokFeed, result: SocialMonitorCheckResul
     } else if (liveState.value) {
       const previous = feed.lastLiveStatus || 'offline';
       const live = liveState.value.live;
-      if (live && previous !== 'live' && isPrimed && feed.notifyOnLive) {
-        if (!socialMonitorStartupGraceActive()) {
+      const videoKey = live
+        ? String(('roomId' in liveState.value && liveState.value.roomId) || ('url' in liveState.value && liveState.value.url) || `tiktok:${feed.id}`)
+        : '';
+      const stabilityKey = `tt:${feed.id}`;
+      const stability = socialLiveStability.get(stabilityKey) || {
+        live: false,
+        consecutiveLive: 0,
+        videoKey: ''
+      };
+
+      if (live) {
+        if (stability.live && stability.videoKey === videoKey) {
+          stability.consecutiveLive += 1;
+        } else if (stability.videoKey === videoKey) {
+          stability.consecutiveLive += 1;
+        } else {
+          stability.consecutiveLive = 1;
+        }
+        stability.live = true;
+        stability.videoKey = videoKey;
+        socialLiveStability.set(stabilityKey, stability);
+      } else {
+        socialLiveStability.set(stabilityKey, {
+          live: false,
+          consecutiveLive: 0,
+          videoKey: ''
+        });
+      }
+
+      const confirmedLive = live &&
+        stability.consecutiveLive >= SOCIAL_LIVE_CONFIRMATIONS_REQUIRED &&
+        stability.videoKey === videoKey;
+
+      if (confirmedLive && previous !== 'live' && isPrimed && feed.notifyOnLive) {
+        const alerted = socialLiveAlerted.get(stabilityKey);
+        const cooldownActive = Boolean(
+          alerted &&
+          alerted.videoKey === videoKey &&
+          Date.now() - alerted.alertedAt < SOCIAL_LIVE_ALERT_COOLDOWN_MS
+        );
+
+        if (!socialMonitorStartupGraceActive() && !cooldownActive) {
           await sendSocialAlert('tiktok', feed, {
             type: 'live',
             title: ('title' in liveState.value && liveState.value.title) ? liveState.value.title : `${feed.creatorName} đang LIVE`,
             url: ('url' in liveState.value && liveState.value.url) ? liveState.value.url : `https://www.tiktok.com/${normalizeTikTokHandle(feed.creatorHandle)}/live`
           });
+          socialLiveAlerted.set(stabilityKey, { videoKey, alertedAt: Date.now() });
           result.alertsSent += 1;
-        } else {
+        } else if (socialMonitorStartupGraceActive()) {
           console.log(`[Social Monitor] Suppressed TikTok startup LIVE transition for ${feed.creatorName}.`);
         }
       }
-      feed.lastLiveStatus = live ? 'live' : 'offline';
+
+      if (confirmedLive) {
+        feed.lastLiveStatus = 'live';
+      } else if (!live) {
+        feed.lastLiveStatus = 'offline';
+      }
     }
 
     feed.lastChecked = new Date().toLocaleString('vi-VN');
