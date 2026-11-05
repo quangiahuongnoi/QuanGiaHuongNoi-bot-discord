@@ -583,55 +583,36 @@ export default function App() {
     return executeModeration(memberId, 'BAN', reason);
   };
 
-  const handleExecuteCommandInApp = (input: string): CommandExecutionOutput => {
-    const result = executeBotCommand(input, commands, {
-      authorName: 'Bạn (Web/App Controller)',
-      serverName: activeGuild.name,
-      memberCount: activeGuild.memberCount,
-      onlineCount: activeGuild.onlineCount,
-      uptimeSeconds: Math.floor((Date.now() - APP_START_TIME) / 1000),
-      currentTrackTitle: tracks[currentTrackIndex]?.title,
-      queueCount: tracks.length,
-      youtubeCount: youtubeFeeds.length,
-      tiktokCount: tiktokFeeds.length
-    });
-
-    if (result.sideEffect?.type === 'PLAY_MUSIC' && result.sideEffect.payload) {
-      const songName = result.sideEffect.payload;
-      fetch('/api/bot/voice-control', {
+  const handleExecuteCommandInApp = async (input: string): Promise<CommandExecutionOutput> => {
+    try {
+      const res = await fetch('/api/bot/execute-command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          guildId: activeGuild.id,
-          action: 'play',
-          query: songName
-        })
-      }).catch(() => {});
-    } else if (result.sideEffect?.type === 'PAUSE_MUSIC') {
-      fetch('/api/bot/voice-control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guildId: activeGuild.id, action: 'pause' })
-      }).catch(() => {});
-    } else if (result.sideEffect?.type === 'SKIP_MUSIC') {
-      fetch('/api/bot/voice-control', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ guildId: activeGuild.id, action: 'skip' })
-      }).catch(() => {});
+        body: JSON.stringify({ guildId: activeGuild.id, input })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        const error = data.error || 'Không thể thực thi lệnh trên Discord.';
+        return { handled: true, replyContent: '❌ ' + error };
+      }
+      addAuditLog({
+        id: `log-${Date.now()}`,
+        timestamp: getNowTime(),
+        actionType: 'ROLE_UPDATE',
+        executor: { name: 'Web/App Controller', isBot: false },
+        details: `Thực thi lệnh thật trên Discord: "${input}"`,
+        severity: 'info',
+        channelName: '#lệnh-bot'
+      });
+      return {
+        handled: Boolean(data.handled),
+        replyContent: data.replyContent || data.message || 'Đã thực thi lệnh trên Discord.',
+        embed: data.embed,
+        sideEffect: data.sideEffect
+      };
+    } catch (error: any) {
+      return { handled: true, replyContent: '❌ Không thể kết nối Bot backend: ' + (error?.message || 'Unknown error') };
     }
-
-    addAuditLog({
-      id: `log-${Date.now()}`,
-      timestamp: getNowTime(),
-      actionType: 'ROLE_UPDATE',
-      executor: { name: 'Web/App Controller', isBot: false },
-      details: `Thực thi lệnh từ xa: "${input}"`,
-      severity: 'info',
-      channelName: '#lệnh-bot'
-    });
-
-    return result;
   };
 
   if (authChecking) {
