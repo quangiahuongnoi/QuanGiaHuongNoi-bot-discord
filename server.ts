@@ -3252,6 +3252,142 @@ async function startServer() {
     }
   });
 
+  // 2b. Execute a command from the Web Dashboard against the real Discord runtime.
+  // This endpoint intentionally does not use the client-side preview engine.
+  app.post('/api/bot/execute-command', async (req, res) => {
+    const { guildId, input } = req.body || {};
+    if (!discordClient || !discordClient.isReady()) {
+      return res.status(400).json({ ok: false, error: 'Bot chưa kết nối Discord Gateway.' });
+    }
+    const parsed = parseCommandInput(String(input || ''));
+    if (!parsed.isCommand) return res.status(400).json({ ok: false, error: 'Lệnh không hợp lệ.' });
+    const aliases: Record<string, string> = { top: 'leaderboard', timeout: 'mute', disconnect: 'leave', dc: 'leave' };
+    const commandName = aliases[parsed.commandName] || parsed.commandName;
+    const commandDef = liveConfig.commands.find((c) => c.name.toLowerCase() === commandName);
+    if (commandDef && !commandDef.enabled) {
+      return res.status(409).json({ ok: false, error: `Lệnh ${parsed.prefix}${commandName} đang bị tắt trong cấu hình Bot.` });
+    }
+
+    const guild = guildId ? discordClient.guilds.cache.get(String(guildId)) : discordClient.guilds.cache.first();
+    if (!guild) return res.status(404).json({ ok: false, error: 'Không tìm thấy máy chủ Discord.' });
+    const author = 'Web/App Admin';
+    const reply = (replyContent: string, extra: any = {}) => res.json({ ok: true, handled: true, replyContent, ...extra });
+
+    try {
+      if (commandDef?.isCustom && commandDef.customResponse) {
+        const processed = commandDef.customResponse.replace(/{user}/g, author).replace(/{server}/g, guild.name).replace(/{args}/g, parsed.rawArgs || 'không có tham số');
+        return reply(processed, { embed: { title: `⚡ Lệnh Tùy Chỉnh: ${parsed.prefix}${commandDef.name}`, description: processed, color: '#6366F1', footer: 'AegisBot Custom Command Engine' } });
+      }
+
+      if (commandName === 'ping') {
+        return reply(`🏓 Pong! Gateway: **${discordClient.ws.ping}ms** · Uptime: **${Math.floor((Date.now() - SERVER_START_TIME) / 1000)}s**`);
+      }
+      if (commandName === 'help') {
+        return reply('📖 Danh sách lệnh đang bật trên Bot:', { embed: { title: '📖 AegisBot Command Center', description: liveConfig.commands.filter((c) => c.enabled).map((c) => `• \`!${c.name}\` — ${c.description}`).join('\\n'), color: '#5865F2' } });
+      }
+      if (commandName === 'serverinfo') {
+        return reply(`🏰 **${guild.name}** — ${guild.memberCount.toLocaleString()} thành viên, ${guild.channels.cache.size} kênh, ${guild.roles.cache.size} vai trò.`, { embed: { title: `🏰 ${guild.name}`, description: 'Dữ liệu lấy trực tiếp từ Discord Gateway.', color: '#5865F2', fields: [{ name: 'Thành viên', value: String(guild.memberCount), inline: true }, { name: 'Kênh', value: String(guild.channels.cache.size), inline: true }, { name: 'Vai trò', value: String(guild.roles.cache.size), inline: true }] } });
+      }
+      if (commandName === 'userinfo') {
+        const target = guild.members.cache.get(parsed.args[0]?.replace(/[<@!>]/g, '') || '') || (await guild.members.fetch(parsed.args[0]?.replace(/[<@!>]/g, '') || '').catch(() => null));
+        if (!target) return res.status(404).json({ ok: false, error: 'Không tìm thấy thành viên. Hãy dùng !userinfo @user hoặc ID.' });
+        return reply(`👤 **${target.user.tag}** — tham gia server: ${target.joinedAt?.toLocaleDateString('vi-VN') || 'không rõ'}.`, { embed: { title: `👤 ${target.displayName}`, description: 'Dữ liệu thành viên lấy trực tiếp từ Discord.', color: '#8B5CF6', fields: [{ name: 'ID', value: target.id }, { name: 'Roles', value: target.roles.cache.filter((r) => r.id !== guild.id).map((r) => r.name).join(', ') || 'Không có' }] } });
+      }
+      if (commandName === 'rank') {
+        const id = parsed.args[0]?.replace(/[<@!>]/g, '') || '';
+        const target = id ? await guild.members.fetch(id).catch(() => null) : null;
+        const memberId = target?.id || guild.members.me?.id;
+        if (!memberId) return res.status(404).json({ ok: false, error: 'Không xác định được thành viên.' });
+        const data = userXPStore.get(`${guild.id}:${memberId}`) || { xp: 0, level: 0, messages: 0 };
+        const info = calculateLevelFromXP(data.xp);
+        return reply(`🏆 **${target?.displayName || author}** — Level ${info.level}, ${data.xp.toLocaleString()} XP.`, { embed: { title: '🏆 Rank thật', description: `Level ${info.level} · ${data.xp.toLocaleString()} XP · ${info.progressPercent}%`, color: '#F59E0B' } });
+      }
+      if (commandName === 'leaderboard') {
+        const top = Array.from(userXPStore.values()).filter((d) => d.guildId === guild.id).sort((a, b) => b.xp - a.xp).slice(0, 10);
+        const description = top.length ? top.map((d, i) => `#${i + 1} **${d.displayName || d.username}** — Level ${d.level} (${d.xp.toLocaleString()} XP)`).join('\\n') : 'Chưa có dữ liệu XP.';
+        return reply('🏆 Bảng xếp hạng lấy trực tiếp từ runtime XP.', { embed: { title: `🏆 Leaderboard — ${guild.name}`, description, color: '#F59E0B' } });
+      }
+
+      if (['play','pause','skip','stop','leave','join','volume','loop','filter'].includes(commandName)) {
+        const voiceAction = commandName === 'join' ? 'join' : commandName;
+        if (voiceAction === 'play') {
+          const query = parsed.rawArgs;
+          if (!query) return res.status(400).json({ ok: false, error: 'Hãy nhập tên bài hát hoặc URL sau !play.' });
+          const { channel } = await findUserVoiceChannel(guild, undefined, undefined);
+          if (!channel) return res.status(404).json({ ok: false, error: 'Không tìm thấy kênh Voice.' });
+          const session = await ensureVoiceSession(guild, channel);
+          const track = await resolveAudioStreamForQuery(query, author);
+          if (session.currentTrack) { session.queue.push(track); return reply(`➕ Đã thêm **${track.title}** vào hàng đợi.`, { track, queued: true, queueLength: session.queue.length }); }
+          await playTrackInSession(session, track);
+          return reply(`🎵 Đang phát **${track.title}** tại 🔊 **${channel.name}**.`, { track, queued: false, queueLength: session.queue.length });
+        }
+        const session = guildVoiceSessions.get(guild.id);
+        if (voiceAction === 'join') {
+          const { channel } = await findUserVoiceChannel(guild, undefined, undefined);
+          if (!channel) return res.status(404).json({ ok: false, error: 'Không tìm thấy kênh Voice.' });
+          await ensureVoiceSession(guild, channel);
+          return reply(`🔊 Đã kết nối vào **${channel.name}**.`);
+        }
+        if (!session) return res.status(409).json({ ok: false, error: 'Bot chưa có phiên Voice.' });
+        if (voiceAction === 'pause') { if (!session.currentTrack) return res.status(409).json({ ok:false,error:'Không có bài đang phát.' }); session.isPaused ? session.player.unpause() : session.player.pause(); session.isPaused = !session.isPaused; return reply(session.isPaused ? '⏸️ Đã tạm dừng.' : '▶️ Đã tiếp tục.'); }
+        if (voiceAction === 'skip') { const next = session.queue.shift(); session.transitioning = true; session.queueGeneration += 1; session.player.stop(true); if (session.audioProcess) { try { session.audioProcess.kill('SIGKILL'); } catch {} session.audioProcess = undefined; } session.currentTrack = null; if (next) { await playTrackInSession(session,next); return reply(`⏭️ Chuyển sang **${next.title}**.`,{track:next}); } session.transitioning=false; return reply('⏭️ Đã bỏ qua, hàng đợi trống.'); }
+        if (voiceAction === 'stop') { session.transitioning=true; session.queue=[]; session.currentTrack=null; session.currentResource=undefined; session.player.stop(true); if(session.audioProcess){try{session.audioProcess.kill('SIGKILL')}catch{} session.audioProcess=undefined;} session.transitioning=false; return reply('⏹️ Đã dừng phát và xóa hàng đợi.'); }
+        if (voiceAction === 'leave') { try{session.connection.destroy()}catch{} guildVoiceSessions.delete(guild.id); return reply('👋 Bot đã rời Voice.'); }
+        if (voiceAction === 'volume') { const vol=Math.max(0,Math.min(100,Number(parsed.args[0]||85))); session.volume=vol; if(session.currentResource?.volume) session.currentResource.volume.setVolume(vol/100); return reply(`🔊 Âm lượng: ${vol}%.`); }
+        if (voiceAction === 'loop') { const mode=String(parsed.args[0]||'off').toUpperCase(); if(!['OFF','TRACK','QUEUE'].includes(mode)) return res.status(400).json({ok:false,error:'Loop phải là off, track hoặc queue.'}); session.loopMode=mode as any; return reply(`🔁 Loop: ${mode}.`); }
+        if (voiceAction === 'filter') { const preset=String(parsed.args[0]||'FLAT').toUpperCase(); if(!['FLAT','BASS_BOOST','VOCAL','NIGHTCORE','LOFI','ACOUSTIC'].includes(preset)) return res.status(400).json({ok:false,error:'Preset Equalizer không hợp lệ.'}); session.filterPreset=preset as any; if(session.currentTrack) await playTrackInSession(session,session.currentTrack); return reply(`🎚️ Equalizer: ${preset}.`); }
+      }
+
+      if (['warn','mute','kick','ban'].includes(commandName)) {
+        const targetId = parsed.args[0]?.replace(/[<@!>]/g, '');
+        if (!targetId) return res.status(400).json({ ok:false,error:'Hãy nhập @user hoặc ID thành viên.' });
+        const member = await guild.members.fetch(targetId).catch(() => null);
+        if (!member) return res.status(404).json({ ok:false,error:'Không tìm thấy thành viên.' });
+        const reason = parsed.args.slice(commandName === 'mute' ? 2 : 1).join(' ') || 'Quản trị từ Web Dashboard';
+        if (commandName === 'warn') { const key=`${guild.id}:${member.id}`; const warnings=(userWarningStore.get(key)||0)+1; userWarningStore.set(key,warnings); appendLog({actionType:'MEMBER_WARN',executor:{name:author,isBot:false},target:{name:member.displayName,id:member.id},details:`Cảnh cáo lần ${warnings}: ${reason}`,severity:'warning'}); return reply(`⚠️ Đã cảnh cáo **${member.displayName}**. Tổng: ${warnings}.`); }
+        if (commandName === 'mute') { const mins=Math.min(40320,Math.max(1,Number(parsed.args[1]||60)||60)); await member.timeout(mins*60000,reason); appendLog({actionType:'MEMBER_TIMEOUT',executor:{name:author,isBot:false},target:{name:member.displayName,id:member.id},details:`Timeout ${mins} phút: ${reason}`,severity:'warning'}); return reply(`⏳ Đã timeout **${member.displayName}** ${mins} phút.`); }
+        if (commandName === 'kick') { if(!member.kickable) return res.status(403).json({ok:false,error:'Bot không thể kick thành viên này.'}); await member.kick(reason); appendLog({actionType:'MEMBER_KICK',executor:{name:author,isBot:false},target:{name:member.displayName,id:member.id},details:reason,severity:'danger'}); return reply(`🔨 Đã kick **${member.displayName}**.`); }
+        if (commandName === 'ban') { if(!member.bannable) return res.status(403).json({ok:false,error:'Bot không thể ban thành viên này.'}); await member.ban({reason}); appendLog({actionType:'MEMBER_BAN',executor:{name:author,isBot:false},target:{name:member.displayName,id:member.id},details:reason,severity:'danger'}); return reply(`⛔ Đã ban **${member.displayName}**.`); }
+      }
+
+      if (commandName === 'clear') {
+        const count=Math.min(100,Math.max(1,Number(parsed.args[0]||10)||10));
+        const channel=guild.channels.cache.find((c)=>c.type===ChannelType.GuildText);
+        if(!channel || !('bulkDelete' in channel)) return res.status(404).json({ok:false,error:'Không tìm thấy kênh text để dọn dẹp.'});
+        const deleted=await (channel as TextChannel).bulkDelete(count,true);
+        appendLog({actionType:'MESSAGE_CLEAR',executor:{name:author,isBot:false},details:`Web Console xóa ${deleted.size} tin nhắn trong #${channel.name}`,severity:'warning',channelName:`#${channel.name}`});
+        return reply(`🧹 Đã xóa ${deleted.size} tin nhắn trong **#${channel.name}**.`);
+      }
+      if (commandName === 'poll') {
+        const question=parsed.rawArgs || 'Bạn có đồng ý với đề xuất này không?';
+        const channel=guild.channels.cache.find((c)=>c.type===ChannelType.GuildText);
+        if(!channel || !('send' in channel)) return res.status(404).json({ok:false,error:'Không tìm thấy kênh text.'});
+        const msg=await (channel as TextChannel).send({embeds:[new EmbedBuilder().setColor(0x3b82f6).setTitle('📊 Khảo Sát').setDescription(`**${question}**\\n\\n👍 — Đồng ý\\n👎 — Không đồng ý`)]});
+        await msg.react('👍').catch(()=>{}); await msg.react('👎').catch(()=>{});
+        return reply(`📊 Đã tạo poll thật tại **#${channel.name}**.`);
+      }
+      if (commandName === 'social' || commandName === 'youtube' || commandName === 'tiktok') {
+        const yt=liveSocialFeeds.youtube.filter((f)=>f.status==='active').map((f)=>`• YouTube: ${f.channelName}`).join('\\n') || '• Không có YouTube feed đang bật.';
+        const tt=liveSocialFeeds.tiktok.filter((f)=>f.status==='active').map((f)=>`• TikTok: ${f.creatorName || f.creatorHandle}`).join('\\n') || '• Không có TikTok feed đang bật.';
+        return reply('📡 Danh sách Social hiện tại lấy trực tiếp từ cấu hình Bot.',{embed:{title:'🔔 Social Monitor',description:yt+'\\n'+tt,color:'#EC4899'}});
+      }
+      if (commandName === 'autorole') {
+        const groups=liveConfig.reactionRoles.filter((g)=>Array.isArray(g.items)&&g.items.length>0);
+        if(!groups.length) return res.status(409).json({ok:false,error:'Chưa có bảng Auto-Role nào được cấu hình.'});
+        const group=groups[0];
+        const channel=guild.channels.cache.get(group.channelId || '') || guild.channels.cache.find((c)=>c.type===ChannelType.GuildText);
+        if(!channel || !('send' in channel)) return res.status(404).json({ok:false,error:'Không tìm thấy kênh để đăng Auto-Role.'});
+        const row=new ActionRowBuilder<ButtonBuilder>();
+        group.items.slice(0,5).forEach((item:any,idx:number)=>row.addComponents(new ButtonBuilder().setCustomId(`role_toggle_${item.roleId}`).setLabel(`${item.emoji ? item.emoji+' ' : ''}${item.roleName}`).setStyle(idx%2===0?ButtonStyle.Primary:ButtonStyle.Secondary)));
+        await (channel as TextChannel).send({embeds:[new EmbedBuilder().setColor(0x8b5cf6).setTitle(group.title||'🎭 Auto-Role').setDescription(group.description||'Chọn vai trò bên dưới.')],components:[row]});
+        return reply(`🎭 Đã đăng bảng Auto-Role thật vào **#${channel.name}**.`);
+      }
+      return res.status(400).json({ok:false,error:`Lệnh !${commandName} chưa được triển khai trong Web Command Console.`});
+    } catch (err:any) {
+      return res.status(500).json({ok:false,error:err?.message || 'Lỗi khi thực thi lệnh thật trên Discord.'});
+    }
+  });
+
   // 3. Sync configuration from Web Dashboard to Live Bot Engine
   app.post('/api/bot/sync-config', (req, res) => {
     const {
