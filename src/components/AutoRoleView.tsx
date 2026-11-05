@@ -363,16 +363,21 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
 
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Tên Vai Trò Thưởng
+                  Vai Trò Discord
                 </label>
-                <input
-                  type="text"
+                <select
                   required
-                  value={newLevelRoleName}
-                  onChange={(e) => setNewLevelRoleName(e.target.value)}
-                  placeholder="Ví dụ: 🏆 Kim Cương Trò Chuyện"
+                  value={newLevelRoleId}
+                  onChange={(e) => {
+                    const role = availableRoles.find(r => r.id === e.target.value);
+                    setNewLevelRoleId(e.target.value);
+                    setNewLevelRoleName(role?.name || '');
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-                />
+                >
+                  <option value="">Chọn role thật trên Discord</option>
+                  {availableRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
               </div>
 
               <button
