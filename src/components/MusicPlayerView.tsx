@@ -17,10 +17,29 @@ import {
   Sliders, 
   ListMusic, 
   FileText,
-  Sparkles
+  Sparkles,
+  Square
 } from 'lucide-react';
 import { Track, LoopMode, formatDuration } from '../bot/logic/musicQueue';
 import { GuildInfo } from '../bot/types';
+
+const EQ_PRESETS = [
+  { id: 'FLAT', name: 'Flat' },
+  { id: 'BASS_BOOST', name: 'Bass Boost' },
+  { id: 'LOFI', name: 'Lo-Fi' },
+  { id: 'VOCAL', name: 'Vocal' },
+  { id: 'NIGHTCORE', name: 'Nightcore' },
+  { id: 'ACOUSTIC', name: 'Acoustic' }
+] as const;
+
+function parseDurationToSeconds(value?: string) {
+  if (!value) return 180;
+  const parts = value.split(':').map(Number);
+  if (parts.some(Number.isNaN)) return 180;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return 180;
+}
 
 interface MusicPlayerViewProps {
   tracks: Track[];
@@ -673,7 +692,7 @@ export const MusicPlayerView: React.FC<MusicPlayerViewProps> = ({
                 Chọn cấu hình âm thanh tối ưu cho tai nghe và phong cách nghe nhạc:
               </div>
               <div className="grid grid-cols-2 gap-2">
-                {eqPresets.map((preset) => (
+                {EQ_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
