@@ -99,12 +99,12 @@ export const INITIAL_YOUTUBE_FEEDS: YouTubeFeed[] = [
     avatar: '',
     discordChannelId: '',
     pingRoleId: undefined,
-    customMessage: '🔴 **{channel_name} đang LIVE / có video mới!**\n**{video_title}**\nXem ngay: {url}',
+    customMessage: '🔴 **{channel_name} đang LIVE!**\n{video_title}\nXem ngay: {url}',
     lastVideoTitle: 'Chưa có dữ liệu mới',
     lastVideoUrl: 'https://www.youtube.com/@quangiahuongnoi',
     lastChecked: 'Chưa kiểm tra',
     notifyOnLive: true,
-    notifyOnUpload: true,
+    notifyOnUpload: false,
     lastLiveStatus: 'offline',
     status: 'active'
   }
