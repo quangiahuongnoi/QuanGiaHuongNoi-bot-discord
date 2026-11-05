@@ -42,7 +42,14 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
 
   // Form state for adding level role
   const [newLevelReq, setNewLevelReq] = useState(10);
-  const [newLevelRoleName, setNewLevelRoleName] = useState('🌟 Tinh Hoa Máy Chủ');
+  const [newLevelRoleId, setNewLevelRoleId] = useState('');
+  const [newLevelRoleName, setNewLevelRoleName] = useState('');
+  const [newGroupTitle, setNewGroupTitle] = useState('🎭 Chọn Vai Trò');
+  const [newGroupDescription, setNewGroupDescription] = useState('Bấm nút để nhận hoặc gỡ vai trò.');
+  const [newGroupChannelId, setNewGroupChannelId] = useState('');
+  const [newGroupItems, setNewGroupItems] = useState<ReactionRoleGroup['items']>([]);
+  const [newRoleId, setNewRoleId] = useState('');
+  const [newRoleEmoji, setNewRoleEmoji] = useState('✨');
 
   // Backend data can be empty/malformed while the bot is reconnecting. Normalize it
   // here so this view can never crash the whole dashboard because of a bad role payload.
@@ -59,6 +66,24 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
     setTimeout(() => setClickedRolesNotice(null), 2500);
   };
 
+  const availableRoles = (guild.roles || []).filter((role) => role.id !== guild.id);
+  const textChannels = (guild.channels || []).filter((channel) => channel.type === 'text');
+
+  const handleAddGroupRole = () => {
+    const role = availableRoles.find((item) => item.id === newRoleId);
+    if (!role || newGroupItems.some((item) => item.roleId === role.id)) return;
+    setNewGroupItems((prev) => [...prev, { roleId: role.id, roleName: role.name, emoji: newRoleEmoji.trim() || '✨', color: role.color || '#5865F2', description: `Nhận vai trò ${role.name}` }]);
+    setNewRoleId('');
+  };
+
+  const handleCreateReactionGroup = () => {
+    if (!newGroupTitle.trim() || newGroupItems.length === 0) return;
+    onAddReactionRoleGroup({ id: `rr-${Date.now()}`, title: newGroupTitle.trim(), description: newGroupDescription.trim(), channelId: newGroupChannelId || textChannels[0]?.id || '', type: 'BUTTON', items: newGroupItems });
+    setNewGroupItems([]);
+    setNewGroupTitle('🎭 Chọn Vai Trò');
+    setNewGroupDescription('Bấm nút để nhận hoặc gỡ vai trò.');
+  };
+
   const handlePublishButtons = async (group: ReactionRoleGroup) => {
     try {
       const res = await fetch('/api/bot/publish-autorole-buttons', {
@@ -68,6 +93,7 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
           guildId: guild.id,
           title: group.title,
           description: group.description,
+          channelId: group.channelId,
           roles: group.items
         })
       });
@@ -85,12 +111,13 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
 
   const handleCreateLevelRole = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newLevelRoleName.trim()) return;
+    if (!newLevelRoleId || !newLevelRoleName.trim()) return;
     onAddLevelRole({
       levelRequired: newLevelReq,
-      roleId: `r-lvl-${newLevelReq}`,
+      roleId: newLevelRoleId,
       roleName: newLevelRoleName.trim()
     });
+    setNewLevelRoleId('');
     setNewLevelRoleName('');
     setNewLevelReq(prev => prev + 5);
   };
@@ -202,7 +229,7 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
                 </div>
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400 pt-2 border-t border-slate-800/80">
-                  <span>Kênh hiển thị: <strong className="text-indigo-400">#trò-chuyện-chung</strong></span>
+                  <span>Kênh hiển thị: <strong className="text-indigo-400">{textChannels.find(c => c.id === group.channelId)?.name ? '#' + textChannels.find(c => c.id === group.channelId)?.name : 'kênh mặc định'}</strong></span>
                   <button
                     type="button"
                     onClick={() => handlePublishButtons(group)}
@@ -214,6 +241,22 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+            <div><h3 className="text-sm font-bold text-white">Tạo Bảng Chọn Vai Trò Mới</h3><p className="text-xs text-slate-400 mt-1">Chọn role thật trên Discord, thêm emoji và kênh đăng.</p></div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <input value={newGroupTitle} onChange={e => setNewGroupTitle(e.target.value)} placeholder="Tiêu đề bảng" className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
+              <select value={newGroupChannelId} onChange={e => setNewGroupChannelId(e.target.value)} className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"><option value="">Kênh text đầu tiên</option>{textChannels.map(ch => <option key={ch.id} value={ch.id}>#{ch.name}</option>)}</select>
+            </div>
+            <input value={newGroupDescription} onChange={e => setNewGroupDescription(e.target.value)} placeholder="Mô tả" className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white" />
+            <div className="flex flex-col sm:flex-row gap-2">
+              <select value={newRoleId} onChange={e => setNewRoleId(e.target.value)} className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"><option value="">Chọn role để thêm</option>{availableRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+              <input value={newRoleEmoji} onChange={e => setNewRoleEmoji(e.target.value)} maxLength={4} className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white text-center" />
+              <button type="button" onClick={handleAddGroupRole} className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold">+ Thêm</button>
+            </div>
+            {newGroupItems.length > 0 && <div className="flex flex-wrap gap-2">{newGroupItems.map(item => <button type="button" key={item.roleId} onClick={() => setNewGroupItems(prev => prev.filter(x => x.roleId !== item.roleId))} className="px-2.5 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-xs text-indigo-200">{item.emoji} {item.roleName} ×</button>)}</div>}
+            <button type="button" disabled={!newGroupItems.length || !newGroupTitle.trim()} onClick={handleCreateReactionGroup} className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold">Tạo & Lưu Bảng Vai Trò</button>
           </div>
         </div>
       )}
@@ -241,9 +284,9 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                 Vai Trò Dành Cho Người Dùng Mới (Members)
               </label>
-              <select className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
-                <option value="r-member">Thành Viên (@Thành Viên)</option>
-                <option value="r-verified">Đã Xác Minh (@Verified)</option>
+              <select value={(guild as any).defaultMemberRoleId || ''} onChange={e => window.dispatchEvent(new CustomEvent('qghn:default-member-role', { detail: e.target.value }))} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                <option value="">Không cấp role</option>
+                {availableRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
             </div>
 
@@ -251,9 +294,9 @@ export const AutoRoleView: React.FC<AutoRoleViewProps> = ({
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                 Vai Trò Dành Cho Bot Mới Mời (Bots)
               </label>
-              <select className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
-                <option value="r-bot">Bot Hệ Thống (@Bot Hệ Thống)</option>
-                <option value="r-integration">Tích Hợp (@Integration)</option>
+              <select value={(guild as any).defaultBotRoleId || ''} onChange={e => window.dispatchEvent(new CustomEvent('qghn:default-bot-role', { detail: e.target.value }))} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white">
+                <option value="">Không cấp role cho bot</option>
+                {availableRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
             </div>
           </div>
