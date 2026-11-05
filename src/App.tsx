@@ -235,18 +235,19 @@ export default function App() {
                 avatar: data.botUser.avatar
               });
             }
+            let currentGuild: any = null;
             if (Array.isArray(data.guilds) && data.guilds.length > 0) {
               setGuilds(data.guilds);
+              currentGuild = data.guilds.find((g: any) => g.id === activeGuild.id) || data.guilds[0];
               setActiveGuild(prev => {
                 const found = data.guilds.find((g: any) => g.id === prev.id);
                 return found || data.guilds[0];
               });
-              const currentGuild = data.guilds.find((g: any) => g.id === activeGuild.id) || data.guilds[0];
               if (Array.isArray(currentGuild.members) && currentGuild.members.length > 0) {
                 setMembers(currentGuild.members);
               }
             }
-            if (currentGuild.activeVoice) {
+            if (currentGuild?.activeVoice) {
               const activeVoice = currentGuild.activeVoice;
               setIsPlaying(Boolean(activeVoice.currentTrack && !activeVoice.isPaused));
               if (typeof activeVoice.volume === 'number') setVolume(activeVoice.volume);
