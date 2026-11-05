@@ -120,7 +120,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
         lastVideoUrl: ytUrl.trim() || `https://www.youtube.com/@${encodeURIComponent(ytName)}`, 
         lastChecked: 'Vừa thêm',
         notifyOnLive: true,
-        notifyOnUpload: true,
+        notifyOnUpload: false,
         status: 'active'
       };
       onAddYouTubeFeed(newYt);
@@ -198,7 +198,7 @@ export const SocialFeedsView: React.FC<SocialFeedsViewProps> = ({
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Tự động kiểm tra định kỳ và thông báo vào Discord khi YouTube/TikTok ra video mới hoặc bắt đầu Livestream. Lần kiểm tra đầu tiên chỉ lấy trạng thái làm mốc, không spam thông báo.
+            Tự động kiểm tra định kỳ và thông báo vào Discord khi kênh đã cấu hình bắt đầu Livestream. YouTube upload notification đã bị khóa để tránh spam video sau mỗi lần restart/deploy.
           </p>
         </div>
 
@@ -664,7 +664,7 @@ const NotificationRoutingModal: React.FC<NotificationRoutingModalProps> = ({
             ))}
           </select>
           <p className="text-[10px] text-slate-500 mt-1">
-            Kênh này sẽ được dùng cho cả thông báo Live và video mới.
+            Kênh này được dùng cho thông báo Live của feed.
           </p>
         </div>
 
