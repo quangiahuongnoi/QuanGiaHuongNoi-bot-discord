@@ -910,7 +910,7 @@ export default function App() {
 
             {currentTab === 'auto-role' && (
               <AutoRoleView
-                reactionGroups={reactionRoleGroups}
+                reactionRoleGroups={reactionRoleGroups}
                 levelRoles={levelRoles}
                 joinRoleEnabled={joinRoleEnabled}
                 onToggleJoinRole={() => {
