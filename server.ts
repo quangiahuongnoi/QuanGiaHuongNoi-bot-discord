@@ -3158,22 +3158,6 @@ async function startServer() {
           });
         }
 
-        if (action === 'remove') {
-          const queueIndex = Number(req.body.queueIndex);
-          if (!Number.isInteger(queueIndex) || queueIndex < 0 || queueIndex >= existingSession.queue.length) {
-            return res.status(400).json({ ok: false, error: 'Vị trí bài hát trong hàng đợi không hợp lệ.' });
-          }
-          const [removed] = existingSession.queue.splice(queueIndex, 1);
-          return res.json({
-            ok: true,
-            message: `Đã xóa "${removed?.title || 'bài hát'}" khỏi hàng đợi.`,
-            removed,
-            queue: existingSession.queue,
-            queueLength: existingSession.queue.length,
-            channelName: existingSession.channelName
-          });
-        }
-
         const vol = typeof req.body.volume === 'number'
           ? Math.max(0, Math.min(100, req.body.volume))
           : 80;
@@ -3442,11 +3426,18 @@ async function startServer() {
       bucket.leaves += 1;
       dayMap.set(key, bucket);
     }
+    const currentMemberCount = guild?.memberCount || 0;
     const memberGrowth = Array.from({ length: 30 }, (_, idx) => {
       const d = new Date(now - (29 - idx) * 86400000);
       const key = d.toLocaleDateString('vi-VN');
       const bucket = dayMap.get(key) || { joins: 0, leaves: 0 };
-      return { date: key, total: guild?.memberCount || 0, joins: bucket.joins, leaves: bucket.leaves };
+      // Reconstruct the best available historical total from tracked join/leave
+      // events instead of repeating today's member count for every day.
+      const eventsAfterDay = [...memberJoinEvents.filter((ts) => ts > d.getTime()), ...memberLeaveEvents.filter((ts) => ts > d.getTime())];
+      const joinsAfterDay = memberJoinEvents.filter((ts) => ts > d.getTime()).length;
+      const leavesAfterDay = memberLeaveEvents.filter((ts) => ts > d.getTime()).length;
+      const estimatedTotal = Math.max(0, currentMemberCount - joinsAfterDay + leavesAfterDay);
+      return { date: key, total: estimatedTotal, joins: bucket.joins, leaves: bucket.leaves };
     });
     const totalMessages = Math.max(1, Array.from(channelMessageCounts.values()).reduce((sum, n) => sum + n, 0));
     const topChannels = Array.from(channelMessageCounts.entries())
