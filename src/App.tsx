@@ -244,8 +244,12 @@ export default function App() {
               setGuilds(data.guilds);
               currentGuild = data.guilds.find((g: any) => g.id === activeGuild.id) || data.guilds[0];
               setActiveGuild(prev => {
-                const found = data.guilds.find((g: any) => g.id === prev.id);
-                return found || data.guilds[0];
+                const found = data.guilds.find((g: any) => g.id === prev.id) || data.guilds[0];
+                return {
+                  ...found,
+                  defaultMemberRoleId: data.config?.defaultMemberRoleId || (prev as any).defaultMemberRoleId || '',
+                  defaultBotRoleId: data.config?.defaultBotRoleId || (prev as any).defaultBotRoleId || ''
+                } as any;
               });
               if (Array.isArray(currentGuild.members) && currentGuild.members.length > 0) {
                 setMembers(currentGuild.members);
