@@ -13,7 +13,7 @@ import {
   Sparkles,
   Zap
 } from 'lucide-react';
-import { GuildInfo, TabType } from '../bot/types';
+import { GuildInfo, TabType, ServerAnalyticsData } from '../bot/types';
 
 interface DashboardOverviewProps {
   guild: GuildInfo;
@@ -29,6 +29,9 @@ interface DashboardOverviewProps {
   onNavigateTab: (tab: TabType) => void;
   onOpenExport: () => void;
   discordClientId?: string;
+  analytics?: ServerAnalyticsData;
+  botPing?: number;
+  queueCount?: number;
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
@@ -37,7 +40,10 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   onToggleModule,
   onNavigateTab,
   onOpenExport,
-  discordClientId = ''
+  discordClientId = '',
+  analytics,
+  botPing = 0,
+  queueCount = 0
 }) => {
   const [copiedLink, setCopiedLink] = React.useState(false);
   const [selectedPerms, setSelectedPerms] = React.useState<string[]>([
@@ -61,6 +67,11 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
+
+  const totalMessagesProcessed = analytics?.hourlyActivity?.reduce((sum, item) => sum + Number(item.messages || 0), 0) || 0;
+  const totalVoiceHours = (analytics?.hourlyActivity?.reduce((sum, item) => sum + Number(item.voiceMinutes || 0), 0) || 0) / 60;
+  const moderationTotal = analytics ? Object.values(analytics.modSummary).reduce((sum, value) => sum + Number(value || 0), 0) : 0;
+  const activeChannelCount = analytics?.topChannels?.length || 0;
 
   const moduleCards = [
     {
@@ -101,7 +112,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       active: modulesEnabled.social,
       icon: Zap,
       color: 'from-rose-500/20 to-pink-500/20',
-      tag: '4 kênh liên kết'
+      tag: `${activeChannelCount} feed đang có dữ liệu`
     },
     {
       id: 'autoRole' as const,
@@ -111,7 +122,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       active: modulesEnabled.autoRole,
       icon: Users,
       color: 'from-purple-500/20 to-violet-500/20',
-      tag: '2 bảng chọn vai trò'
+      tag: 'Dữ liệu từ Discord runtime'
     },
     {
       id: 'logs' as const,
@@ -184,7 +195,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             <span className="text-2xl font-bold text-white font-mono tabular-nums">
               {guild.memberCount.toLocaleString()}
             </span>
-            <span className="text-xs text-emerald-400 font-medium">+12 hôm nay</span>
+            <span className="text-xs text-slate-500 font-medium">runtime</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
             Đang trực tuyến: <strong className="text-slate-300 font-mono tabular-nums">{guild.onlineCount}</strong>
@@ -198,12 +209,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-white font-mono tabular-nums">
-              24,850
+              {totalMessagesProcessed.toLocaleString()}
             </span>
-            <span className="text-xs text-blue-400 font-medium">99.4% an toàn</span>
+            <span className="text-xs text-blue-400 font-medium">runtime</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
-            Tốc độ phản hồi trung bình: <strong className="text-slate-300 font-mono">18ms</strong>
+            Gateway ping: <strong className="text-slate-300 font-mono">{botPing > 0 ? botPing + "ms" : "—"}</strong>
           </div>
         </div>
 
@@ -214,12 +225,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-white font-mono tabular-nums">
-              142 giờ
+              {totalVoiceHours.toFixed(1)} giờ
             </span>
-            <span className="text-xs text-emerald-400 font-medium">24/7 online</span>
+            <span className="text-xs text-emerald-400 font-medium">runtime</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
-            4 bài hát đang chờ trong hàng đợi
+            {queueCount} mục trong hàng đợi / phiên phát hiện tại
           </div>
         </div>
 
@@ -230,12 +241,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-white font-mono tabular-nums">
-              29
+              {moderationTotal}
             </span>
-            <span className="text-xs text-amber-400 font-medium">7 ngày qua</span>
+            <span className="text-xs text-amber-400 font-medium">runtime</span>
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
-            18 cảnh cáo · 6 timeout · 3 kick · 2 ban
+            {analytics ? `${analytics.modSummary.warns} warn · ${analytics.modSummary.timeouts} timeout · ${analytics.modSummary.kicks} kick · ${analytics.modSummary.bans} ban` : 'Chưa có telemetry'}
           </div>
         </div>
       </div>
